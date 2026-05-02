@@ -1,13 +1,27 @@
 # ĐỒ ÁN MÔN HỌC - UniHub Workshop
 
-## Dánh sách thành viên:
+## Dánh sách thành viên
+
 | MSSV | Họ và tên | Email |
 | ----------- | ----------- |  ----------- |
-| 23127417 | Đào Hoàng Đức Mạnh | dhdmanh23@clc.fitus.edu.vn |
-| 22127403 | Nguyễn Trần Minh Thư | ntmthu22@clc.fitus.edu.vn |
-| 23127362 | Phạm Anh Hào | |
+| 23127417 | Đào Hoàng Đức Mạnh | <dhdmanh23@clc.fitus.edu.vn> |
+| 22127403 | Nguyễn Trần Minh Thư | <ntmthu22@clc.fitus.edu.vn> |
+| 23127362 | Phạm Anh Hào | <pahao23@clc.fitus.edu.vn> |
+
+## Quy định commit
+
+Format: `<type>(<scope>): <description>`
+
+- `feat:` New feature
+- `fix:` Bug fix
+- `refactor:` Code restructure
+- `test:` Tests
+- `chore:` Configs, dependencies, CI, docs, formatting
+
+*Example:* `feat: add offline check-in`
 
 ## Techstack
+
 ```
 {
   "firstName": "John",
@@ -15,7 +29,9 @@
   "age": 25
 }
 ```
-## Cấu trúc dự án:
+
+## Cấu trúc dự án
+
 ```
 unihub-workshop/
 ├── blueprint/               # Tài liệu thiết kế (Phần 1)
@@ -45,24 +61,21 @@ unihub-workshop/
 └── README.md                # Hướng dẫn cài đặt (MANDATORY)
 ```
 
-## Hướng dẫn cài đặt 
+## Hướng dẫn cài đặt
+
 **bold text**
 *italicized text*
 > blockquote
+
 1. First item
 2. Second item
 3. Third item
+
 - First item
 - Second item
 - Third item
 `code`
+
 ---
 [title](https://www.example.com)
 ![alt text](image.jpg)
-
-```
-feat: — A new feature
-fix: — A bug fix
-refactor: — Code change that doesn’t add a feature or fix a bug
-chore: — General maintenance (e.g. project config, dependency bumps)
-```
