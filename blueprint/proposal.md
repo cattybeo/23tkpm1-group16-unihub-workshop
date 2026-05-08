@@ -24,22 +24,22 @@
 
 ## Mục tiêu
 
-- **Tính nhất quán dữ liệu:** Tuyệt đối không để 2 sinh viên cùng nhận được chỗ cuối cùng của một workshop (seat contention → optimistic locking + queue).
-- **Chịu tải cao:** Đáp ứng ≥ 12.000 sinh viên truy cập đồng thời trong 10 phút đầu mở đăng ký, trong đó 60% dồn vào 3 phút đầu. Cơ chế rate limiting bảo vệ backend và đảm bảo công bằng giữa các sinh viên.
+- **Tính nhất quán dữ liệu:** Tuyệt đối không để 2 sinh viên cùng nhận được chỗ cuối cùng của một workshop (seat contention → pessimistic locking với `SELECT ... FOR UPDATE` trong transaction, kết hợp rate limit ở edge để serialize burst).
+- **Chịu tải cao:** Hệ thống được **thiết kế** để đáp ứng ≥ 12.000 sinh viên truy cập đồng thời trong 10 phút đầu mở đăng ký (60% dồn vào 3 phút đầu). Cơ chế rate limiting bảo vệ backend và đảm bảo công bằng giữa các sinh viên. **Phạm vi MVP không verify load thực tế** — số liệu là mục tiêu thiết kế, không phải kết quả benchmark.
 - **Thanh toán minh bạch:** Chống double-charge qua idempotency key. Graceful degradation: khi cổng thanh toán down, các tính năng xem và đăng ký workshop miễn phí vẫn hoạt động bình thường.
-- **Check-in offline-first:** Quét mã QR ngay cả khi mất mạng (IndexedDB → Background Sync). Khi reconnect: 0% mất dữ liệu, conflict giải quyết theo server timestamp.
+- **Check-in offline-first:** Quét mã QR ngay cả khi mất mạng (IndexedDB queue → foreground sync khi reconnect, không dùng Background Sync API vì iOS Safari không hỗ trợ). Khi reconnect: 0% mất dữ liệu, conflict giải quyết theo server timestamp + UNIQUE constraint.
 - **Tích hợp một chiều an toàn:** Đọc file CSV export từ hệ thống cũ. Validate nghiêm ngặt (bỏ qua dòng lỗi, loại trùng lặp) — pipeline chạy ngầm, không gián đoạn hệ thống đang chạy.
 - **Thông báo plug-in:** Gửi xác nhận qua in-app + email. Kiến trúc cho phép thêm kênh mới (Telegram, v.v.) mà không sửa logic lõi.
 - **AI Summary:** Tóm tắt nội dung workshop từ PDF upload (AI provider: cloud LLM, fallback mock nếu rate limit).
 
 **Success metrics:**
 
-| Metric | Mục tiêu |
-|---|---|
-| Double-booking | = 0 |
-| p99 latency đăng ký tại peak | < 500 ms |
-| Data loss khi offline → reconnect | 0% |
-| CSV import | Bỏ qua dòng lỗi, không crash service |
+| Metric | Mục tiêu | Cách verify ở MVP |
+|---|---|---|
+| Double-booking | = 0 | Vitest test race condition (concurrent insert), code review pessimistic lock |
+| p99 latency đăng ký tại peak | < 500 ms (mục tiêu thiết kế) | Không verify thực tế ở MVP — chỉ chứng minh qua thiết kế (rate limit + DB transaction nhanh) |
+| Data loss khi offline → reconnect | 0% | Demo: tắt wifi → check-in → bật wifi → bấm Sync → record xuất hiện DB |
+| CSV import | Bỏ qua dòng lỗi, không crash service | Demo: upload file có 2 row sai format → import 8/10, log 2 error |
 
 ## Người dùng
 
@@ -81,9 +81,9 @@
 
 ## Rủi ro và ràng buộc
 
-1. **Tranh chấp chỗ ngồi:** Nhiều sinh viên đăng ký cùng một chỗ cuối cùng → cần locking (optimistic lock hoặc SELECT FOR UPDATE) kết hợp queue để serialise request.
+1. **Tranh chấp chỗ ngồi:** Nhiều sinh viên đăng ký cùng một chỗ cuối cùng → dùng pessimistic lock (`SELECT ... FOR UPDATE` trong transaction PostgreSQL) kết hợp rate limit ở edge để serialize burst. Lý do chọn pessimistic thay vì optimistic: với 7.200 request / 3 phút tranh 60 chỗ, conflict xác suất cao → optimistic gây retry storm; pessimistic deterministic, dễ test, dễ giải thích trong demo.
 2. **Tải đột biến:** 12.000 user / 10 phút, đỉnh 60% trong 3 phút → rate limiting + caching để bảo vệ backend, fairness FIFO khi burst.
 3. **Thanh toán không ổn định:** Timeout giữa chừng → rollback trạng thái + idempotency key để ngăn double-charge; circuit breaker để isolate lỗi khỏi phần còn lại hệ thống.
-4. **Đồng bộ offline:** Một số khu vực trong trường mất mạng → IndexedDB lưu tạm, Background Sync flush khi reconnect, conflict giải quyết theo server timestamp.
+4. **Đồng bộ offline:** Một số khu vực trong trường mất mạng → IndexedDB lưu tạm, foreground sync flush khi reconnect (auto trên `online` event + nút "Đồng bộ ngay"). Không dùng Background Sync API vì iOS Safari không hỗ trợ. Conflict giải quyết theo server timestamp + UNIQUE constraint trên `(registration_id)`.
 5. **Dữ liệu CSV kém chất lượng:** File export đêm có thể lỗi format hoặc trùng lặp → validate nghiêm ngặt từng dòng, bỏ qua dòng lỗi, log chi tiết để ban tổ chức review.
 6. **Tích hợp một chiều:** Không có API hệ thống cũ → pipeline import phải xử lý được file lỗi và chạy ngầm mà không block request đang live.
