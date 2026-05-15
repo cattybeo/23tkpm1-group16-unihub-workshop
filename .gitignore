@@ -53,6 +53,7 @@ yarn-error.log*
 # Dependencies
 node_modules/
 package-lock.json
+skills-lock.json
 
 # Build output
 dist/
@@ -67,6 +68,11 @@ out/
 # Claude Code
 .mcp.json
 .claude/
+.agents/
 /.cocoindex_code/
 docs/
 CLAUDE.md
+
+# Custom
+knowledge-context/
+knowledge-dictionary.md
