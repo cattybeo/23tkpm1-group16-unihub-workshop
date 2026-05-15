@@ -70,7 +70,6 @@ out/
 .claude/
 .agents/
 /.cocoindex_code/
-docs/
 CLAUDE.md
 
 # Custom

@@ -4,38 +4,35 @@
 
 ## Kiến trúc tổng thể
 
-**Kiến trúc: Modular Monolith** — một deployable artifact duy nhất, bên trong chia thành nhiều module có ranh giới rõ ràng. Mỗi phần của hệ thống áp dụng một phong cách kiến trúc đã học (slide bài giảng `Software Architecture.md`):
+<!-- Mô tả architectural style được chọn và lý do.
+     Hệ thống gồm những thành phần nào? Chúng giao tiếp với nhau như thế nào? -->
 
-| Phần hệ thống | Style kiến trúc | Lý do |
+UniHub Workshop được xây dựng theo kiểu **Modular Monolith** — một đơn vị triển khai duy nhất, bên trong chia thành các module có ranh giới rõ ràng. Lựa chọn này phù hợp với quy mô dự án nhỏ, không có yêu cầu scale-out độc lập từng module. Microservices bị loại vì overhead vận hành (service discovery, distributed tracing) chiếm 30–40% thời gian mà không mang lại giá trị tương xứng (áp dụng YAGNI). Peer-to-Peer cũng không phù hợp vì hệ thống cần kiểm soát tập trung cho RBAC và seat reservation nhất quán.
+
+Bên trong Modular Monolith, mỗi phần áp dụng một phong cách kiến trúc riêng phù hợp với đặc thù của nó:
+
+| Phần hệ thống | Phong cách | Lý do |
 |---|---|---|
-| Giao tiếp client ↔ server | Client-Server | Web/PWA + REST Stateles |
-| Backend core | Layered | 4 lớp Express routes -> services -> repositories -> database |
-| Notification dispatch | Event-based | Giảm coupling cho extensible channel |
-| CSV import pipeline | Batch Sequential | Nightly ETL, không streaming |
-| AI Summary | Pipe-and-Filter | PDF → extract text → clean → chunk → LLM summarize → save |
+| Giao tiếp client ↔ server | Client-Server | Web/PWA + REST stateless |
+| Backend core | Layered | 4 tầng: routes → services → repositories → database |
+| Gửi thông báo | Event-based | Giảm coupling, dễ bổ sung kênh mới (Telegram, v.v.) |
+| Nhập dữ liệu CSV | Batch Sequential | ETL chạy định kỳ, không cần streaming |
+| Tạo tóm tắt AI | Pipe-and-Filter | PDF → trích văn bản → làm sạch → chunk → LLM → lưu |
 
-**Không Microservices vì** project nhỏ, không over-engineering. Backend Express duy nhất dễ debug, dễ deploy, không mất 30-40% time vào infra. Áp dụng YAGNI.
+### Cấu trúc backend
 
-### Kiến trúc KHÔNG dùng và lý do
+Backend Express áp dụng kiến trúc Layered 4 tầng, mỗi tầng chỉ phụ thuộc vào tầng ngay dưới nó:
 
-- **Main Program & Subroutine**: cấu trúc thủ tục C/Pascal/COBOL — không phù hợp web app hiện đại với nhiều entry point đồng thời.
-- **OO Systems làm top-level style**: vẫn dùng OO ở code level (TypeScript class trong services), nhưng không lấy làm phong cách kiến trúc tổng thể vì Layered đã bao hàm.
-- **Peer-to-Peer**: không phù hợp vì yêu cầu kiểm soát chỗ ngồi nhất quán và RBAC chặt cần kiểm soát tập trung.
-- **Event-driven với Kafka/RabbitMQ**: cần broker trung tâm + 3 node HA -> over engineering.
-- **SOA**: scope "tích hợp ERP/CRM doanh nghiệp" -> không phù hợp.
-
-**4 lớp của Layered backend:**
-
-| Layer | Vai trò | Thành phần |
+| Tầng | Vai trò | Thành phần |
 |---|---|---|
-| Presentation | Nhận request, validate input, trả response | Express routes |
-| Business Logic | Chứa rule nghiệp vụ, orchestration use case | Services |
-| Adapter | Định nghĩa/implement interface | Interfaces + adapters |
-| Data Access | Truy cập dữ liệu | Repositories + Supabase client |
+| Trình bày | Nhận request, kiểm tra đầu vào, trả response | Express routes |
+| Nghiệp vụ | Chứa rule nghiệp vụ, điều phối use case | Services |
+| Adapter | Định nghĩa và implement interface | Interfaces + adapters |
+| Truy cập dữ liệu | Truy vấn và ghi dữ liệu | Repositories + Supabase client |
 
-### Module decomposition
+### Phân chia module
 
-Layered chia theo lớp; cần thêm chia theo bounded context để 3 thành viên làm parallel không đụng nhau.
+Layered chia theo chiều ngang (tầng); để 3 thành viên làm song song không xung đột, hệ thống chia thêm theo chiều dọc thành 8 bounded context. Mỗi bounded context sở hữu routes, service và repository riêng — không module nào truy cập trực tiếp dữ liệu của module khác.
 
 ```
                        VERTICAL (bounded contexts)
@@ -62,31 +59,24 @@ Cross-cutting middleware (chạy trước routes của mọi module):
   • Logger + Error handler
 ```
 
-**8 module và trách nhiệm:**
+| Module | Trách nhiệm chính | Phong cách |
+|---|---|---|
+| Catalog | Xem/tìm kiếm workshop, query số chỗ, cache | Layered |
+| Registration | Đặt chỗ atomic, tạo mã QR, phát sự kiện | Layered |
+| Payment | Thanh toán mock gateway, circuit breaker, idempotency | Layered |
+| Notification | Nhận sự kiện, gửi thông báo in-app + email | Event-based |
+| Checkin | Xác thực mã QR, đồng bộ check-in ngoại tuyến, ghi log xung đột | Layered |
+| Identity & Access | Đăng nhập (Supabase Auth), xác thực JWT, ánh xạ role | Layered |
+| DataSync | Đọc CSV (cron 02:00) → kiểm tra → chuyển đổi → upsert sinh viên | Batch Sequential |
+| AI Summary | PDF → trích văn bản → làm sạch → chunk → LLM → gộp → lưu | Pipe-and-Filter |
 
-| Module | Trách nhiệm chính | Phong cách áp dụng |
-|--------|-------------------|---------------------|
-| Catalog | List/CRUD workshop, query seats_remaining, cache | Layered |
-| Registration | Seat reservation atomic, generate QR token, emit event | Layered |
-| Payment | Charge mock gateway, idempotency check, circuit breaker | Layered |
-| Notification | Subscribe events, dispatch in-app + email + Telegram tương lai, outbox | Event-based |
-| Checkin | Verify QR, insert check_ins, sync offline queue, log conflicts | Layered |
-| Identity & Access | Login (Supabase Auth), JWT verify, role mapping | Layered |
-| DataSync | Đọc CSV từ shared filesystem (cron 02:00) → validate → transform → upsert students | Batch Sequential |
-| AI Summary | PDF → extract → clean → chunk → LLM → merge → save | Pipe-and-Filter |
+### Giao tiếp giữa các thành phần
 
-**Ranh giới Business Logic ↔ Infrastructure (Ports & Adapters):**
+Các module giao tiếp qua đúng 2 kênh, không có ngoại lệ. Kênh thứ nhất là **gọi trực tiếp đồng bộ** trong cùng một request — dùng khi cần kết quả ngay (ví dụ: Registration gọi Payment khi người dùng bấm thanh toán). Kênh thứ hai là **EventEmitter bất đồng bộ** kiểu fire-and-forget — dùng khi không cần đợi kết quả và muốn tách coupling (ví dụ: Registration phát sự kiện `RegistrationConfirmed`, Notification lắng nghe và gửi email mà không làm chậm response trả về người dùng).
 
-- *Business logic* (services/) chứa: invariant nghiệp vụ ("không bán quá capacity", "1 SV không đăng ký 2 lần cùng workshop", "charge phải có idempotency key"). Không biết về HTTP, không biết về SQL, không import library Stripe/OpenAI/nodemailer trực tiếp.
-- *Port* (TypeScript interface): hợp đồng services cần. Ví dụ `interface PaymentGateway { charge(amount, key): Result }`, `interface Notifier { send(channel, msg) }`.
-- *Adapter* (infrastructure layer): implement port bằng tech cụ thể. `SupabaseWorkshopRepository`, `MockPaymentAdapter`, `SmtpEmailAdapter`, `OpenAiSummaryAdapter`. Đăng ký vào DI container tại bootstrap.
+Ranh giới giữa nghiệp vụ và hạ tầng được giữ chặt theo mô hình Ports & Adapters. Tầng nghiệp vụ (services/) chỉ phụ thuộc vào TypeScript interface (port) như `IPaymentGateway`, `INotifier`, `IWorkshopRepository` — không import trực tiếp bất kỳ thư viện hạ tầng nào (Supabase, OpenAI, nodemailer). Các adapter implement port bằng công nghệ cụ thể và được đăng ký vào DI container lúc khởi động.
 
-**Inter-module communication — 2 kênh duy nhất được phép:**
-
-1. Service A gọi service B trực tiếp (cùng request, đồng bộ): ví dụ Registration gọi Payment khi user bấm thanh toán.
-2. EventEmitter (async fire-and-forget): ví dụ Registration emit `RegistrationConfirmed` → Notification subscribe.
-
-**Cấm:** service A không được import repository của module B. Nếu Catalog cần biết SV đã đăng ký workshop nào, phải gọi `registrationService.findByStudent()`, không query bảng `registrations` trực tiếp. Quy tắc này giữ module boundary để sau MVP có thể tách microservice mà không phải refactor lan rộng.
+Một quy tắc bắt buộc: service của module A không được import repository của module B. Nếu Catalog cần biết sinh viên đã đăng ký workshop nào, phải gọi `registrationService.findByStudent()`, không query trực tiếp bảng `registrations`. Quy tắc này giữ ranh giới module rõ ràng — nếu sau này cần tách microservice, phạm vi refactor sẽ chỉ nằm trong đúng module đó.
 
 ---
 
@@ -244,12 +234,16 @@ ALTER TABLE students        ENABLE ROW LEVEL SECURITY;
 
 Token Bucket cho phép burst ngắn hạn (phù hợp "60% trong 3 phút đầu") đồng thời chặn client gửi liên tục khi vượt ngưỡng.
 
-**Cấu hình 2 tier:**
+**Cấu hình 2 lớp:**
 
-| Tier | Route | Giới hạn | Hành vi khi vượt |
+| Lớp | Route | Giới hạn | Hành vi khi vượt |
 |------|-------|----------|-----------------|
-| Global | `GET /api/v1/*` | 200 req / 15 phút / IP | 429 + `Retry-After` header |
-| Critical | `POST /api/v1/registrations` | 10 req / phút / IP | 429 `{ code: "RATE_LIMIT_EXCEEDED" }` |
+| Global | `/api/v1/*` | 200 req / 15 phút / IP | 429 + `Retry-After` header |
+| Critical | `POST /api/v1/registrations` | 20 req / phút / IP | 429 `{ code: "RATE_LIMIT_EXCEEDED" }` |
+
+Ngưỡng critical chọn 20 req/min (thay vì 10) vì bottleneck thật sự là row-level lock tại DB — rate limit chỉ cần shed excess burst, không cần chặt đến mức gây 429 oan cho user retry hợp lệ. Hành vi FE thực tế: network lag → retry 3 lần + user bấm lại 2 lần = ~5 req trong 10–20 giây; ngưỡng 10 quá gần, 20 cho biên an toàn hơn.
+
+**Lưu ý về DB load ẩn:** middleware `loadProfile` chạy trước mọi route có auth → mỗi request authenticated thêm 1 SELECT vào bảng `profiles`. Rate limit 200 req/15min/IP kiểm soát tần suất từ client, nhưng DB thực tế nhận gấp đôi số query so với con số rate limit biểu thị (1 SELECT profiles + 1 business query). Cần tính điều này khi đọc ngưỡng capacity.
 
 **Luồng trạng thái:**
 
@@ -326,7 +320,7 @@ RETURNING seats_remaining;
 
 **Tại sao đây vẫn là pessimistic locking:** Postgres row-level lock được nắm ngay khi UPDATE chạm row, giữ đến hết transaction. Hai request đến cùng millisecond sẽ bị serialize tại row lock — chỉ 1 request thấy `seats_remaining > 0`, request thứ 2 đợi, đọc giá trị đã giảm.
 
-**Tại sao không dùng `BEGIN; SELECT ... FOR UPDATE; UPDATE; COMMIT;`:** Pattern verbose hơn — 4 round-trip thay vì 1, cùng level isolation. Câu UPDATE đơn lẻ ngắn gọn hơn, ít chỗ sai hơn. Vẫn wrap trong transaction nếu cần INSERT registration cùng lúc:
+**Tại sao không dùng `BEGIN; SELECT ... FOR UPDATE; UPDATE; COMMIT;`:** Pattern rườm rà : 4 round-trip thay vì 1, cùng level isolation. Câu UPDATE đơn lẻ ngắn gọn hơn, ít chỗ sai hơn. Vẫn wrap trong transaction nếu cần INSERT registration cùng lúc:
 
 ```typescript
 async function reserveSeat(workshopId: string, studentId: string, idempotencyKey: string) {
@@ -421,7 +415,7 @@ async function idempotencyMiddleware(req, res, next) {
 
   // Atomic INSERT: nếu key đã có → CONFLICT, RETURNING rỗng
   // Nếu key mới → INSERT thành công, RETURNING row.
-  // Hai request retry đến cùng micro-second: Postgres serialize qua PK, chỉ 1 thắng.
+  // Hai request retry đến cùng micro-second: Postgres serialize qua PK, chỉ 1 request được nhận.
   const insert = await db.query(`
     INSERT INTO idempotency_keys (key, endpoint, status)
     VALUES ($1, $2, 'in_progress')
@@ -430,21 +424,21 @@ async function idempotencyMiddleware(req, res, next) {
   `, [key, req.path])
 
   if (insert.rows.length === 0) {
-    // Đã có request khác nắm key này — đây là retry hoặc duplicate
+    // Đã có request khác nắm key này -> retry hoặc duplicate
     const existing = await db.query(
       `SELECT status, response FROM idempotency_keys WHERE key = $1 AND endpoint = $2`,
       [key, req.path]
     )
     const row = existing.rows[0]
     if (row.status === 'in_progress') {
-      // Request gốc đang chạy — trả 409 để client biết retry sau
+      // Request gốc đang chạy -> trả 409 để client biết retry sau
       return res.status(409).json({ error: { code: 'REQUEST_IN_PROGRESS' } })
     }
-    // status='done' — trả response đã cache
+    // status='done' -> trả response đã cache
     return res.json(row.response)
   }
 
-  // Ta là người đầu tiên — chạy handler, cập nhật status sau khi response.
+  // Ta là người đầu tiên -> chạy handler, cập nhật status sau khi response.
   // Proxy res.json để capture body và UPDATE status='done'.
   const originalJson = res.json.bind(res)
   res.json = (body) => {
@@ -458,17 +452,15 @@ async function idempotencyMiddleware(req, res, next) {
 }
 ```
 
-**Tại sao INSERT trước, không SELECT trước:** Pattern naive *"SELECT, nếu rỗng thì xử lý + INSERT"* có race condition — 2 request retry đến cùng millisecond, cả 2 đều SELECT rỗng, cả 2 cùng xử lý → cùng charge 2 lần, rồi cùng INSERT (1 fail PK violation, nhưng *side effect payment đã xảy ra 2 lần rồi*). INSERT ON CONFLICT là single atomic operation — Postgres đảm bảo chỉ 1 request thắng qua PK constraint.
+**Tại sao INSERT trước, không SELECT trước:** Pattern naive *"SELECT, nếu rỗng thì xử lý + INSERT"* có race condition — 2 request retry đến cùng millisecond, cả 2 đều SELECT rỗng, cả 2 cùng xử lý -> cùng charge 2 lần, rồi cùng INSERT (1 fail PK violation, nhưng *side effect payment đã xảy ra 2 lần rồi*). INSERT ON CONFLICT là single atomic operation — Postgres đảm bảo chỉ 1 request thắng qua PK constraint.
 
 **TTL:** 24 giờ. Không cần job dọn dẹp ở MVP vì bảng tăng chậm (~hàng nghìn row/ngày).
 
-**Client phía FE:** tạo `crypto.randomUUID()` lúc user bấm nút *lần đầu*, lưu trong React state. Mỗi lần retry trong cùng phiên dùng *cùng* key đó. Reload trang → key mới.
+**Client phía FE:** tạo `crypto.randomUUID()` lúc user bấm nút *lần đầu*, lưu trong React state. Mỗi lần retry trong cùng phiên dùng *cùng* key đó. Reload trang -> key mới.
 
 ---
 
 ## Các quyết định kỹ thuật quan trọng (ADR)
-
-Xem chi tiết toàn bộ lý luận, trade-off và slide nguồn tại [`docs/architecture-decisions.md`](../docs/architecture-decisions.md).
 
 | ADR | Quyết định | Slide nguồn chính | Yêu cầu |
 |-----|-----------|-------------------|---------|
@@ -511,13 +503,13 @@ Xem chi tiết toàn bộ lý luận, trade-off và slide nguồn tại [`docs/a
 
 ### Quyết định KHÔNG triển khai (YAGNI)
 
-Những item dưới đây được **hiểu và cân nhắc**, nhưng không implement vì chưa cần thiết ở MVP:
+Các lựa chọn dưới đây được **hiểu và cân nhắc**, nhưng không implement:
 
-- Sharding / Read replica — single Supabase instance đủ
-- Redis distributed cache — in-memory đủ cho single instance
-- Kafka / RabbitMQ / BullMQ — Node EventEmitter in-process đủ
-- Microservices / Service mesh — overhead vượt capacity đội
-- Background Sync API — iOS Safari không support
-- Real payment gateway / email provider — mock đủ chứng minh design
-- Telegram notifier implementation — interface đủ chứng minh OCP
-- Two-Phase Commit — Saga compensating (release seat khi payment fail) thay thế
+- Sharding / Read replica: single Supabase instance đủ
+- Redis distributed cache: in-memory đủ cho single instance
+- Kafka / RabbitMQ / BullMQ: Node EventEmitter in-process đủ
+- Microservices / Service mesh: overhead vượt capacity đội
+- Background Sync API: iOS Safari không support
+- Real payment gateway / email provider: mock đủ chứng minh design
+- Telegram notifier implementation: interface đủ chứng minh OCP
+- Two-Phase Commit: release seat khi payment fail thay thế
