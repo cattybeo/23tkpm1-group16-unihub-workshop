@@ -71,7 +71,9 @@ out/
 .agents/
 /.cocoindex_code/
 CLAUDE.md
+AGENTS.md
 
 # Custom
 knowledge-context/
 knowledge-dictionary.md
+.playwright-mcp/
