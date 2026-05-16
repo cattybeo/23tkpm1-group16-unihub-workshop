@@ -113,35 +113,35 @@ Lý do: dữ liệu có quan hệ chặt chẽ, cần ACID cho seat reservation,
 
 <!-- Mô hình phân quyền, các nhóm người dùng, cách kiểm tra quyền tại từng điểm truy cập -->
 
-### Mô hình: RBAC + Ownership check
+### Mô hình: RBAC thuần
 
 Hệ thống có 3 role cố định. Đề bài gợi ý RBAC và nhóm chọn RBAC, không dùng ABAC vì không có yêu cầu policy động (ví dụ "chỉ sinh viên khoa X đăng ký workshop khoa X") — setup ABAC engine (Casbin/OPA) tốn 2–3 ngày với ROI bằng 0 cho 3 role tĩnh.
 
-**Ngoại lệ — ownership của workshop:** đề không nói rõ organizer A có được sửa workshop của organizer B hay không. Nhóm quyết định: organizer chỉ sửa/huỷ workshop **mình tạo ra** (`workshops.created_by = req.user.id`). Thuật ngữ học thuật gọi đây là RBAC mở rộng với 1 attribute (ReBAC). Tài liệu này gọi tắt là **ownership check**.
+**Single committee:** mọi organizer ngang quyền trên mọi workshop. Không có ownership check, không có `created_by`, không có `FORBIDDEN_OWNERSHIP`.
 
 ### Nhóm người dùng và quyền hạn
 
-| Hành động | Endpoint | student | organizer (owner) | organizer (non-owner) | scanner | anon |
-|---|---|---|---|---|---|---|
-| Xem danh sách workshop | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Xem chi tiết workshop đã publish | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Xem workshop chưa publish | `GET /api/v1/workshops/:id` | ✗ | ✓ | ✓ | ✗ | ✗ (trả 404) |
-| Tạo workshop | `POST /api/v1/workshops` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Sửa workshop | `PATCH /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ | ✗ |
-| Huỷ workshop | `DELETE /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ | ✗ |
-| Đăng ký workshop | `POST /api/v1/registrations` | ✓ (chỉ cho mình) | ✗ | ✗ | ✗ | ✗ |
-| Xem đăng ký của mình | `GET /api/v1/registrations/me` | ✓ | — | — | — | ✗ |
-| Xem toàn bộ đăng ký | `GET /api/v1/admin/registrations` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Quét QR check-in | `POST /api/v1/check-ins` | ✗ | ✓ | ✓ | ✓ | ✗ |
-| Xem thống kê | `GET /api/v1/admin/stats` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Upload PDF + gen AI summary | `POST /api/v1/workshops/:id/summary` | ✗ | ✓ | ✗ | ✗ | ✗ |
-| Trigger import CSV | `POST /api/v1/admin/csv-import` | ✗ | ✓ | ✓ | ✗ | ✗ |
+| Hành động | Endpoint | student | organizer | scanner | anon |
+|---|---|---|---|---|---|
+| Xem danh sách workshop | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ |
+| Xem chi tiết workshop đã publish | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ |
+| Xem workshop chưa publish | `GET /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ (trả 404) |
+| Tạo workshop | `POST /api/v1/workshops` | ✗ | ✓ | ✗ | ✗ |
+| Sửa workshop | `PATCH /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ |
+| Huỷ workshop | `DELETE /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ |
+| Đăng ký workshop | `POST /api/v1/registrations` | ✓ (chỉ cho mình) | ✗ | ✗ | ✗ |
+| Xem đăng ký của mình | `GET /api/v1/registrations/me` | ✓ | — | — | ✗ |
+| Xem toàn bộ đăng ký | `GET /api/v1/admin/registrations` | ✗ | ✓ | ✗ | ✗ |
+| Quét QR check-in | `POST /api/v1/check-ins` | ✗ | ✓ | ✓ | ✗ |
+| Xem thống kê | `GET /api/v1/admin/stats` | ✗ | ✓ | ✗ | ✗ |
+| Upload PDF + gen AI summary | `POST /api/v1/workshops/:id/summary` | ✗ | ✓ | ✗ | ✗ |
+| Trigger import CSV | `POST /api/v1/admin/csv-import` | ✗ | ✓ | ✗ | ✗ |
 
-Quy ước: ✓ cho phép, ✗ từ chối (403), — không áp dụng cho role này, "owner" = `workshops.created_by = req.user.id`.
+Quy ước: ✓ cho phép, ✗ từ chối (403), — không áp dụng cho role này.
 
 **Lưu ý 404 vs 403:** khi anon/student truy cập workshop chưa publish, hệ thống trả 404 thay vì 403 để không leak sự tồn tại của resource (information disclosure).
 
-**Role assignment:** `role` được ghi vào `app_metadata` trong Supabase Auth (client không tự thay đổi được). Organizer và scanner phải được ban tổ chức cấp thủ công qua admin UI — không có self-signup lên role cao hơn.
+**Role assignment:** `role` lưu ở `profiles.role` (Postgres). `loadProfile` middleware query DB mỗi request — không đọc từ JWT claim để revoke có hiệu lực ngay. Admin cấp role bằng UPDATE trực tiếp bảng `profiles`. Không có self-signup lên role cao hơn.
 
 ### Cách kiểm tra quyền tại từng điểm truy cập
 
@@ -149,7 +149,7 @@ Quy ước: ✓ cho phép, ✗ từ chối (403), — không áp dụng cho role
 
 | Lớp | Cơ chế | Áp cho |
 |-----|--------|--------|
-| **Lớp 1 — chính:** Express middleware | Verify JWT → load profile → check role + ownership | Mọi request đến `/api/v1/*` |
+| **Lớp 1 — chính:** Express middleware | Verify JWT → load profile → check role | Mọi request đến `/api/v1/*` |
 | **Lớp 2 — phụ:** Supabase RLS | Deny-all mặc định + 2 policy public | Chỉ 2 bảng FE chạm trực tiếp (`workshops`, `profiles`) |
 
 Backend Express dùng `SUPABASE_SERVICE_ROLE_KEY` để bypass RLS cho mọi query nghiệp vụ. Mọi quyết định phân quyền do middleware Lớp 1 thực hiện — không duplicate logic xuống RLS. RLS Lớp 2 chỉ là safety net cho Realtime và Supabase JS FE gọi trực tiếp.
@@ -163,10 +163,6 @@ Backend Express dùng `SUPABASE_SERVICE_ROLE_KEY` để bypass RLS cho mọi que
 verifyJwt          // 1. parse Authorization header → req.user.id
 loadProfile        // 2. SELECT profiles → req.user.role, req.user.mssv
 requireRole(roles) // 3. role không trong whitelist → 403 FORBIDDEN_ROLE
-requireOwnership(  // 4. fetch resource, so sánh created_by → 403 FORBIDDEN_OWNERSHIP
-  resourceLoader,
-  ownerField
-)
 ```
 
 Ví dụ áp cho route sửa workshop:
@@ -176,7 +172,6 @@ router.patch('/api/v1/workshops/:id',
   verifyJwt,
   loadProfile,
   requireRole(['organizer']),
-  requireOwnership(loadWorkshop, 'created_by'),
   workshopController.update
 );
 ```
@@ -192,7 +187,6 @@ router.patch('/api/v1/workshops/:id',
 | JWT hết hạn | 401 | `TOKEN_EXPIRED` |
 | Profile không tồn tại trong DB | 401 | `PROFILE_NOT_FOUND` |
 | Role không đủ | 403 | `FORBIDDEN_ROLE` |
-| Organizer A sửa workshop của B | 403 | `FORBIDDEN_OWNERSHIP` |
 | Resource không tồn tại | 404 | `RESOURCE_NOT_FOUND` |
 
 ### RLS minimal (Lớp 2)
