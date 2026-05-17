@@ -6,6 +6,9 @@ import { MobileNav } from '@/components/MobileNav';
 import { DiscoverPage } from '@/pages/DiscoverPage';
 import { WorkshopDetailPage } from '@/pages/WorkshopDetailPage';
 import { MyTicketsPage } from '@/pages/MyTicketsPage';
+import { ScannerPage } from '@/pages/ScannerPage';
+import { AdminDashboard } from '@/pages/AdminDashboard';
+import { LoginPage } from '@/pages/LoginPage';
 
 function Layout() {
   const location = useLocation();
@@ -33,6 +36,9 @@ export default function App() {
             <Route path="workshop/:id" element={<WorkshopDetailPage />} />
             <Route path="tickets" element={<MyTicketsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="scanner" element={<ScannerPage />} />
+            <Route path="admin" element={<AdminDashboard />} />
+            <Route path="login" element={<LoginPage />} />
           </Route>
         </Routes>
       </TicketsProvider>

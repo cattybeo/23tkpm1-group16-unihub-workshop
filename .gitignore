@@ -77,3 +77,8 @@ AGENTS.md
 knowledge-context/
 knowledge-dictionary.md
 .playwright-mcp/
+
+
+backend/scripts/bootstrap-admin.ts
+backend/scripts/seed-workshop.ts
+
