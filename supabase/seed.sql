@@ -3,7 +3,7 @@
 -- =============================================================================
 -- Chạy SAU migration 00001. Dữ liệu mẫu đủ để demo:
 --   - 10 students whitelist (KHỚP với data/students_nightly_2026-05-13.csv)
---   - 3 staff (2 organizer + 1 scanner) + 3 students có account
+--   - 3 staff (2 organizer + 1 staff) + 3 students có account
 --   - 4 workshops: 1 free còn chỗ, 1 free hết chỗ, 1 có phí (có AI summary),
 --                  1 đã huỷ
 --   - 5 registrations đủ các status
@@ -45,8 +45,14 @@ values
   ('aaaaaaa2-0000-0000-0000-000000000002', 'organizer2@unihub.edu',
    '{"display_name":"Ban tổ chức 2"}', crypt('demo-password', gen_salt('bf')),
    now(), now(), now(), 'authenticated', 'authenticated'),
-  ('bbbbbbb1-0000-0000-0000-000000000001', 'scanner1@unihub.edu',
+  ('bbbbbbb1-0000-0000-0000-000000000001', 'staff1@unihub.edu',
    '{"display_name":"Nhân sự check-in 1"}', crypt('demo-password', gen_salt('bf')),
+   now(), now(), now(), 'authenticated', 'authenticated'),
+  ('dddddd01-0000-0000-0000-000000000001', 'btc@unihub',
+   '{"display_name":"Ban tổ chức"}', crypt('123', gen_salt('bf')),
+   now(), now(), now(), 'authenticated', 'authenticated'),
+  ('dddddd02-0000-0000-0000-000000000002', 'staff@unihub',
+   '{"display_name":"Staff"}', crypt('123', gen_salt('bf')),
    now(), now(), now(), 'authenticated', 'authenticated'),
   ('ccccccc1-0000-0000-0000-000000000001', 'an.nguyen@student.unihub.edu',
    '{"display_name":"Nguyễn Văn An"}', crypt('demo-password', gen_salt('bf')),
@@ -65,7 +71,9 @@ on conflict (id) do nothing;
 insert into profiles (id, role, mssv, display_name, phone) values
   ('aaaaaaa1-0000-0000-0000-000000000001', 'organizer', null, 'Ban tổ chức 1', '0901111001'),
   ('aaaaaaa2-0000-0000-0000-000000000002', 'organizer', null, 'Ban tổ chức 2', '0901111002'),
-  ('bbbbbbb1-0000-0000-0000-000000000001', 'scanner',   null, 'Nhân sự check-in 1', '0902222001'),
+  ('bbbbbbb1-0000-0000-0000-000000000001', 'staff',     null, 'Nhân sự check-in 1', '0902222001'),
+  ('dddddd01-0000-0000-0000-000000000001', 'organizer', null, 'Ban tổ chức',        null),
+  ('dddddd02-0000-0000-0000-000000000002', 'staff',     null, 'Staff',              null),
   ('ccccccc1-0000-0000-0000-000000000001', 'student', '21127001', 'Nguyễn Văn An',         '0903333001'),
   ('ccccccc2-0000-0000-0000-000000000002', 'student', '21127002', 'Trần Thị Bích Ngọc',    '0903333002'),
   ('ccccccc3-0000-0000-0000-000000000003', 'student', '23127050', 'Đào Hoàng Đức Mạnh',    '0903333009');
@@ -76,7 +84,7 @@ insert into profiles (id, role, mssv, display_name, phone) values
 insert into workshops (id, title, description, speaker_name, speaker_bio, room,
                        start_time, end_time, capacity, seats_remaining, fee_vnd,
                        pdf_url, summary_md, summary_generated_at,
-                       is_published, created_by) values
+                       is_published) values
   ('22222222-2222-2222-2222-222222220001',
    'AI cho người mới: prompting hiệu quả',
    'Workshop nhập môn về Prompt Engineering, dành cho sinh viên năm 1-2.',
@@ -85,7 +93,7 @@ insert into workshops (id, title, description, speaker_name, speaker_bio, room,
    '2026-05-20 09:00:00+07', '2026-05-20 11:30:00+07',
    60, 58, 0,
    null, null, null,
-   true, 'aaaaaaa1-0000-0000-0000-000000000001'),
+   true),
 
   ('22222222-2222-2222-2222-222222220002',
    'CV & phỏng vấn công ty công nghệ',
@@ -95,7 +103,7 @@ insert into workshops (id, title, description, speaker_name, speaker_bio, room,
    '2026-05-21 14:00:00+07', '2026-05-21 17:00:00+07',
    30, 0, 0,
    null, null, null,
-   true, 'aaaaaaa1-0000-0000-0000-000000000001'),
+   true),
 
   ('22222222-2222-2222-2222-222222220003',
    'Workshop chuyên sâu: System Design',
@@ -107,7 +115,7 @@ insert into workshops (id, title, description, speaker_name, speaker_bio, room,
    'storage://workshop-pdf/system-design-intro.pdf',
    E'# Tóm tắt nội dung\n\n- Caching multi-layer (CDN, app cache, DB)\n- Sharding strategies\n- Hands-on: thiết kế URL shortener cho 1B users.',
    now() - interval '6 hours',
-   true, 'aaaaaaa2-0000-0000-0000-000000000002'),
+   true),
 
   ('22222222-2222-2222-2222-222222220004',
    'Buổi nói chuyện với cựu sinh viên (ĐÃ HUỶ)',
@@ -117,7 +125,7 @@ insert into workshops (id, title, description, speaker_name, speaker_bio, room,
    '2026-05-23 10:00:00+07', '2026-05-23 11:30:00+07',
    80, 80, 0,
    null, null, null,
-   true, 'aaaaaaa1-0000-0000-0000-000000000001');
+   true);
 
 update workshops
    set cancelled_at = now()
@@ -177,7 +185,7 @@ insert into idempotency_keys (key, endpoint, user_id, response) values
 -- ----------------------------------------------------------------------------
 -- 8. check_ins — 1 cột timestamp duy nhất
 -- ----------------------------------------------------------------------------
-insert into check_ins (registration_id, scanner_user_id, source, checked_in_at) values
+insert into check_ins (registration_id, staff_user_id, source, checked_in_at) values
   ('33333333-3333-3333-3333-333333330001',
    'bbbbbbb1-0000-0000-0000-000000000001',
    'online', now() - interval '5 minutes');
