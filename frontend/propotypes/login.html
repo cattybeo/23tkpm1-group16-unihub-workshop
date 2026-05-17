@@ -1,0 +1,205 @@
+import React, { useState } from 'react';
+import { Eye, EyeOff, Loader2, KeyRound, ShieldCheck } from 'lucide-react';
+
+export default function UniHubLogin() {
+const [formData, setFormData] = useState({ identifier: '', password: '' });
+const [showPassword, setShowPassword] = useState(false);
+const [isLoading, setIsLoading] = useState(false);
+
+// State quản lý luồng màn hình (State Machine)
+const [currentView, setCurrentView] = useState('login'); // 'login' | 'change_password' | 'main'
+const [newPasswordData, setNewPasswordData] = useState({ newPassword: '', confirmPassword: '' });
+
+const handleSubmit = (e) => {
+e.preventDefault();
+setIsLoading(true);
+
+// Simulate API call & Business Logic
+setTimeout(() => {
+setIsLoading(false);
+// Mock logic: Kiểm tra tài khoản cấp mặc định
+if (formData.identifier === 'abc' && formData.password === '123') {
+setCurrentView('change_password');
+} else {
+setCurrentView('main');
+}
+}, 1500);
+};
+
+const handleChangePasswordSubmit = (e) => {
+e.preventDefault();
+setIsLoading(true);
+// Simulate API update password
+setTimeout(() => {
+setIsLoading(false);
+setCurrentView('main');
+}, 1500);
+};
+
+return (
+<div className="min-h-screen flex flex-col items-center justify-center p-[20px] relative" // Áp dụng bg-[#F5F5F7] và
+    font mặc định của Apple theo design-style.md style={{ backgroundColor: '#F5F5F7' ,
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif' }}>
+    {/* Brand Header - Góc trái trên như mockup */}
+    <div className="absolute top-[32px] left-[32px] flex items-center gap-[10px] cursor-pointer">
+        <div
+            className="w-[32px] h-[32px] bg-[#007AFF] rounded-[8px] text-white flex items-center justify-center shadow-[0_2px_8px_rgba(0,122,255,0.3)]">
+            <span className="text-[16px] font-bold">U</span>
+        </div>
+        <span className="font-bold text-[20px] tracking-tight text-[#1C1C1E]">UniHub Workshop</span>
+    </div>
+
+    {currentView === 'login' && (
+    <div
+        className="w-full max-w-[480px] bg-white rounded-[24px] p-[32px] md:p-[48px] shadow-[0_8px_30px_rgba(0,0,0,0.06)] animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+        <div className="mb-[32px]">
+            <p className="text-[15px] font-medium text-[#8E8E93] mb-[8px]">
+                Vui lòng nhập thông tin của bạn
+            </p>
+            <h1 className="text-[32px] md:text-[40px] font-bold leading-tight tracking-tight text-[#1C1C1E]">
+                Chào mừng trở lại
+            </h1>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-[20px]">
+            {/* Email / Username Field */}
+            <div className="flex flex-col gap-[8px]">
+                <input type="text" placeholder="Mã số sinh viên hoặc Email" required value={formData.identifier}
+                    onChange={(e)=> setFormData({ ...formData, identifier: e.target.value })}
+                className="w-full h-[50px] px-[16px] bg-white border border-[#E5E5EA] rounded-[14px] text-[15px]
+                font-medium text-[#1C1C1E] placeholder:text-[#8E8E93] focus:outline-none focus:border-[#007AFF]
+                focus:ring-4 focus:ring-[#007AFF]/10 transition-all"
+                />
+            </div>
+
+            {/* Password Field */}
+            <div className="flex flex-col gap-[8px] relative">
+                <input type={showPassword ? 'text' : 'password' } placeholder="Mật khẩu" required
+                    value={formData.password} onChange={(e)=> setFormData({ ...formData, password: e.target.value })}
+                className="w-full h-[50px] pl-[16px] pr-[48px] bg-white border border-[#E5E5EA] rounded-[14px]
+                text-[15px] font-medium text-[#1C1C1E] placeholder:text-[#8E8E93] focus:outline-none
+                focus:border-[#007AFF] focus:ring-4 focus:ring-[#007AFF]/10 transition-all"
+                />
+                <button type="button" onClick={()=> setShowPassword(!showPassword)}
+                    className="absolute right-[16px] top-[15px] text-[#8E8E93] hover:text-[#1C1C1E] transition-colors
+                    focus:outline-none"
+                    >
+                    {showPassword ?
+                    <EyeOff className="w-[20px] h-[20px]" /> :
+                    <Eye className="w-[20px] h-[20px]" />}
+                </button>
+            </div>
+
+            {/* Options: Remember me & Forgot Password */}
+            <div className="flex items-center justify-between mt-[4px]">
+                <label className="flex items-center gap-[8px] cursor-pointer group">
+                    <div className="relative flex items-center justify-center w-[20px] h-[20px]">
+                        <input type="checkbox"
+                            className="peer appearance-none w-[20px] h-[20px] border-[1.5px] border-[#C7C7CC] rounded-[6px] checked:bg-[#007AFF] checked:border-[#007AFF] transition-colors cursor-pointer" />
+                        <svg className="absolute w-[12px] h-[12px] text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
+                            strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                    <span className="text-[14px] font-medium text-[#1C1C1E] select-none">Ghi nhớ 30 ngày</span>
+                </label>
+
+                <a href="#" className="text-[14px] font-semibold text-[#007AFF] hover:text-[#006DEB] transition-colors">
+                    Quên mật khẩu?
+                </a>
+            </div>
+
+            {/* Primary Submit Button */}
+            <button type="submit" disabled={isLoading}
+                className="w-full h-[50px] mt-[8px] bg-[#007AFF] text-white rounded-[14px] text-[17px] font-semibold flex items-center justify-center transition-all hover:bg-[#006DEB] hover:shadow-[0_4px_12px_rgba(0,122,255,0.3)] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed">
+                {isLoading ?
+                <Loader2 className="w-[20px] h-[20px] animate-spin" /> : 'Đăng nhập'}
+            </button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-[16px] my-[8px]">
+                <div className="flex-1 h-[1px] bg-[#E5E5EA]"></div>
+                <span className="text-[13px] font-medium text-[#8E8E93]">HOẶC</span>
+                <div className="flex-1 h-[1px] bg-[#E5E5EA]"></div>
+            </div>
+
+            {/* School SSO Button */}
+            <button type="button"
+                className="w-full h-[50px] bg-white border border-[#E5E5EA] text-[#1C1C1E] rounded-[14px] text-[17px] font-semibold flex items-center justify-center gap-[12px] transition-all hover:bg-[#F2F2F7] active:scale-[0.98]">
+                <img src="./Logo Đơn.png" alt="HCMUS Logo" className="w-[24px] h-[24px] object-contain" onError={(e)=>
+                {
+                e.target.onerror = null;
+                e.target.src =
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Logo_Trường_Đại_học_Khoa_học_Tự_nhiên%2C_Đại_học_Quốc_gia_Thành_phố_Hồ_Chí_Minh.svg/1024px-Logo_Trường_Đại_học_Khoa_học_Tự_nhiên%2C_Đại_học_Quốc_gia_Thành_phố_Hồ_Chí_Minh.svg.png';
+                }}
+                />
+                Đăng nhập với Email trường
+            </button>
+        </form>
+    </div>
+    )}
+
+    {currentView === 'change_password' && (
+    <div
+        className="w-full max-w-[480px] bg-white rounded-[24px] p-[32px] md:p-[48px] shadow-[0_8px_30px_rgba(0,0,0,0.06)] animate-in fade-in slide-in-from-right-8 duration-500">
+        <div className="mb-[32px]">
+            <div
+                className="w-[48px] h-[48px] bg-[#FF9500]/10 rounded-[16px] flex items-center justify-center mb-[16px]">
+                <KeyRound className="w-[24px] h-[24px] text-[#FF9500]" />
+            </div>
+            <p className="text-[15px] font-medium text-[#8E8E93] mb-[8px]">
+                Bảo mật tài khoản
+            </p>
+            <h1 className="text-[32px] md:text-[40px] font-bold leading-tight tracking-tight text-[#1C1C1E]">
+                Đổi mật khẩu
+            </h1>
+            <p className="text-[15px] text-[#8E8E93] mt-[12px] leading-relaxed">
+                Đây là lần đầu bạn đăng nhập. Vui lòng đổi mật khẩu do nhà trường cấp để bảo vệ tài khoản.
+            </p>
+        </div>
+
+        <form onSubmit={handleChangePasswordSubmit} className="flex flex-col gap-[20px]">
+            <div className="flex flex-col gap-[8px]">
+                <input type="password" placeholder="Mật khẩu mới" required value={newPasswordData.newPassword}
+                    onChange={(e)=> setNewPasswordData({ ...newPasswordData, newPassword: e.target.value })}
+                className="w-full h-[50px] px-[16px] bg-white border border-[#E5E5EA] rounded-[14px] text-[15px]
+                font-medium text-[#1C1C1E] placeholder:text-[#8E8E93] focus:outline-none focus:border-[#007AFF]
+                focus:ring-4 focus:ring-[#007AFF]/10 transition-all"
+                />
+            </div>
+            <div className="flex flex-col gap-[8px]">
+                <input type="password" placeholder="Xác nhận mật khẩu mới" required
+                    value={newPasswordData.confirmPassword} onChange={(e)=> setNewPasswordData({ ...newPasswordData,
+                confirmPassword: e.target.value })}
+                className="w-full h-[50px] px-[16px] bg-white border border-[#E5E5EA] rounded-[14px] text-[15px]
+                font-medium text-[#1C1C1E] placeholder:text-[#8E8E93] focus:outline-none focus:border-[#007AFF]
+                focus:ring-4 focus:ring-[#007AFF]/10 transition-all"
+                />
+            </div>
+
+            <button type="submit" disabled={isLoading || !newPasswordData.newPassword || newPasswordData.newPassword
+                !==newPasswordData.confirmPassword}
+                className="w-full h-[50px] mt-[8px] bg-[#007AFF] text-white rounded-[14px] text-[17px] font-semibold flex items-center justify-center transition-all hover:bg-[#006DEB] hover:shadow-[0_4px_12px_rgba(0,122,255,0.3)] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed">
+                {isLoading ?
+                <Loader2 className="w-[20px] h-[20px] animate-spin" /> : 'Cập nhật & Đăng nhập'}
+            </button>
+        </form>
+    </div>
+    )}
+
+    {currentView === 'main' && (
+    <div className="text-center animate-in zoom-in duration-500">
+        <div
+            className="w-[64px] h-[64px] bg-[#34C759]/10 rounded-[24px] flex items-center justify-center mx-auto mb-[24px]">
+            <ShieldCheck className="w-[32px] h-[32px] text-[#34C759]" />
+        </div>
+        <h1 className="text-[24px] font-bold text-[#1C1C1E] mb-[8px] tracking-tight">Đăng nhập thành công</h1>
+        <p className="text-[15px] font-medium text-[#8E8E93]">Đang chuyển hướng đến hệ thống...</p>
+    </div>
+    )}
+
+</div>
+);
+}

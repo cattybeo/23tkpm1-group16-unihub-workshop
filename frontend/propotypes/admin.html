@@ -1,0 +1,664 @@
+import React, { useState } from 'react';
+import {
+LayoutDashboard, CalendarRange, Users, Sparkles,
+Plus, Trash2, UploadCloud, ChevronLeft,
+CheckCircle2, CreditCard, Activity,
+TrendingUp, Image as ImageIcon, Map, MonitorPlay
+} from 'lucide-react';
+
+// --- MOCK DATA ---
+const INITIAL_WORKSHOPS = [
+{
+id: 'w1',
+title: 'Seminar Chuyên đề: Tối ưu hoá Hệ thống phân tán',
+speaker: 'Khoa CNTT x VNG Corporation',
+day: 'Thứ 2 - 12/05/2026',
+time: '08:00 - 11:00',
+room: 'Giảng đường 1, Tòa nhà I',
+cover_url: 'https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=800&auto=format&fit=crop', // Thêm thuộc
+tính ảnh bìa
+room_map_url: 'https://images.unsplash.com/photo-1576085898323-218337e3e43c?q=80&w=800&auto=format&fit=crop',
+capacity: 150,
+seats_remaining: 8,
+status: 'published',
+isFree: true,
+fee_vnd: 0,
+aiSummary: 'Seminar chuyên sâu về kiến trúc microservices và Kubernetes. Sinh viên sẽ được xem live-demo cách scale hệ
+thống chịu tải lớn thực tế. Yêu cầu đã học môn Mạng Máy Tính.'
+},
+{
+id: 'w2',
+title: 'Chuỗi Kỹ năng mềm: Chinh phục Nhà tuyển dụng IT',
+speaker: 'Phòng CTSV & FPT Software',
+day: 'Thứ 3 - 13/05/2026',
+time: '13:30 - 16:30',
+room: 'Hội trường T',
+cover_url: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?q=80&w=800&auto=format&fit=crop',
+room_map_url: '',
+capacity: 300,
+seats_remaining: 0,
+status: 'published',
+isFree: false,
+fee_vnd: 50000,
+aiSummary: 'Hướng dẫn viết CV chuẩn hệ thống quét tự động (ATS), thực hành phỏng vấn hành vi theo mô hình STAR.'
+}
+];
+
+const DASHBOARD_STATS = {
+totalRevenue: 15000000,
+registrations: { confirmed: 442, pendingPayment: 45, expired: 12 },
+checkIns: { online: 310, offline: 85 }
+};
+
+export default function AdminApp() {
+const [currentView, setCurrentView] = useState('dashboard');
+const [workshops, setWorkshops] = useState(INITIAL_WORKSHOPS);
+const [editingWorkshop, setEditingWorkshop] = useState(null);
+
+const [isUploadingPDF, setIsUploadingPDF] = useState(false);
+const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+const [tempSummary, setTempSummary] = useState('');
+
+// Tách biệt state upload cho 2 loại ảnh
+const [isUploadingMap, setIsUploadingMap] = useState(false);
+const [isUploadingCover, setIsUploadingCover] = useState(false);
+
+const handleEdit = (ws) => {
+setEditingWorkshop(ws);
+setTempSummary(ws.aiSummary || '');
+setCurrentView('editor');
+};
+
+const handleCreateNew = () => {
+setEditingWorkshop({
+id: `new-${Date.now()}`,
+title: '', speaker: '', day: '', time: '', room: '',
+cover_url: '', room_map_url: '',
+capacity: 100, seats_remaining: 100, status: 'draft', isFree: true, fee_vnd: 0, aiSummary: ''
+});
+setTempSummary('');
+setCurrentView('editor');
+};
+
+const handleSimulateAI = () => {
+setIsUploadingPDF(true);
+setTimeout(() => {
+setIsUploadingPDF(false);
+setIsGeneratingAI(true);
+setTimeout(() => {
+setIsGeneratingAI(false);
+setTempSummary('Đây là nội dung được AI tóm tắt tự động từ file PDF bạn vừa tải lên. Hệ thống đã bóc tách các keyword
+chính như: Cấu trúc dữ liệu, Thuật toán, Ứng dụng thực tế...');
+}, 2000);
+}, 1500);
+};
+
+const handleSimulateUploadMap = () => {
+setIsUploadingMap(true);
+setTimeout(() => {
+setIsUploadingMap(false);
+setEditingWorkshop({
+...editingWorkshop,
+room_map_url: 'https://images.unsplash.com/photo-1576085898323-218337e3e43c?q=80&w=800&auto=format&fit=crop'
+});
+}, 1500);
+};
+
+const handleSimulateUploadCover = () => {
+setIsUploadingCover(true);
+setTimeout(() => {
+setIsUploadingCover(false);
+setEditingWorkshop({
+...editingWorkshop,
+cover_url: 'https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=800&auto=format&fit=crop'
+});
+}, 1500);
+};
+
+const handleSaveWorkshop = (e) => {
+e.preventDefault();
+const isNew = editingWorkshop.id.startsWith('new-');
+if (isNew) {
+setWorkshops([...workshops, { ...editingWorkshop, id: `w${Date.now()}`, aiSummary: tempSummary }]);
+} else {
+setWorkshops(workshops.map(w => w.id === editingWorkshop.id ? { ...editingWorkshop, aiSummary: tempSummary } : w));
+}
+setCurrentView('workshops');
+};
+
+const Sidebar = () => (
+<div className="w-[260px] bg-[#F9F9F9] border-r border-[#E5E5EA] h-screen fixed left-0 top-0 flex flex-col z-10">
+    <div className="h-[80px] flex items-center px-[24px] border-b border-[#E5E5EA] bg-white">
+        <div className="font-bold text-[20px] tracking-tight text-[#1C1C1E] flex items-center gap-[12px]">
+            <div
+                className="w-[32px] h-[32px] bg-[#007AFF] rounded-[8px] text-white flex items-center justify-center text-[14px] shadow-[0_2px_8px_rgba(0,122,255,0.3)]">
+                U
+            </div>
+            UniHub <span
+                className="text-[#007AFF] font-medium text-[13px] bg-[#007AFF]/10 px-[8px] py-[2px] rounded-[6px] ml-[4px]">Admin</span>
+        </div>
+    </div>
+
+    <nav className="flex-1 py-[24px] px-[16px] space-y-[8px]">
+        <button onClick={()=> setCurrentView('dashboard')}
+            className={`w-full flex items-center gap-[12px] px-[16px] py-[12px] rounded-[12px] text-[15px] font-medium
+            transition-all duration-200 ${
+            currentView === 'dashboard' ? 'bg-[#007AFF] text-white shadow-[0_4px_12px_rgba(0,122,255,0.25)]' :
+            'text-[#5C5C5E] hover:bg-[#007AFF]/10 hover:text-[#007AFF]'
+            }`}
+            >
+            <LayoutDashboard className="w-[20px] h-[20px]" /> Tổng quan
+        </button>
+        <button onClick={()=> setCurrentView('workshops')}
+            className={`w-full flex items-center gap-[12px] px-[16px] py-[12px] rounded-[12px] text-[15px] font-medium
+            transition-all duration-200 ${
+            currentView === 'workshops' || currentView === 'editor' ? 'bg-[#007AFF] text-white
+            shadow-[0_4px_12px_rgba(0,122,255,0.25)]' : 'text-[#5C5C5E] hover:bg-[#007AFF]/10 hover:text-[#007AFF]'
+            }`}
+            >
+            <CalendarRange className="w-[20px] h-[20px]" /> Quản lý Workshop
+        </button>
+    </nav>
+
+    <div className="p-[20px] border-t border-[#E5E5EA] bg-white">
+        <div
+            className="flex items-center gap-[12px] bg-[#F2F2F7] px-[16px] py-[12px] rounded-[16px] border border-[#E5E5EA]/50">
+            <div
+                className="w-[40px] h-[40px] rounded-[12px] bg-[#007AFF]/10 flex items-center justify-center font-bold text-[#007AFF] text-[15px] shadow-sm">
+                BTC
+            </div>
+            <div>
+                <p className="text-[15px] font-bold text-[#1C1C1E] leading-tight">Ban Tổ Chức</p>
+                <p className="text-[13px] text-[#8E8E93] font-medium mt-[2px]">Khoa CNTT - HCMUS</p>
+            </div>
+        </div>
+    </div>
+</div>
+);
+
+const DashboardView = () => {
+const totalCapacity = workshops.reduce((acc, curr) => acc + curr.capacity, 0);
+const totalCheckIns = DASHBOARD_STATS.checkIns.online + DASHBOARD_STATS.checkIns.offline;
+
+return (
+<div className="animate-in fade-in duration-300 max-w-[1200px]">
+    <div className="flex items-center justify-between mb-[32px]">
+        <h1 className="text-[32px] font-bold text-[#1C1C1E] tracking-tight">Thống kê hệ thống</h1>
+        <div
+            className="flex items-center gap-[8px] px-[12px] py-[6px] bg-[#34C759]/10 rounded-full border border-[#34C759]/20">
+            <div className="w-[8px] h-[8px] bg-[#34C759] rounded-full animate-pulse"></div>
+            <span className="text-[13px] font-medium text-[#34C759]">Dữ liệu cập nhật lúc 02:00 AM</span>
+        </div>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-[20px] mb-[24px]">
+        <div
+            className="bg-white p-[20px] rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#E5E5EA] flex flex-col justify-between h-[140px]">
+            <div className="flex items-center justify-between">
+                <p className="text-[14px] font-medium text-[#8E8E93]">Tổng Doanh Thu</p>
+                <div className="w-[32px] h-[32px] rounded-[8px] bg-[#34C759]/10 flex items-center justify-center">
+                    <CreditCard className="w-[16px] h-[16px] text-[#34C759]" />
+                </div>
+            </div>
+            <div>
+                <h3 className="text-[28px] font-bold text-[#1C1C1E] leading-none mb-[8px]">
+                    {DASHBOARD_STATS.totalRevenue.toLocaleString('vi-VN')} <span
+                        className="text-[16px] text-[#8E8E93]">đ</span>
+                </h3>
+                <p className="text-[12px] text-[#34C759] font-medium flex items-center gap-[4px]">
+                    <TrendingUp className="w-[12px] h-[12px]" /> Thanh toán thành công
+                </p>
+            </div>
+        </div>
+
+        <div
+            className="bg-white p-[20px] rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#E5E5EA] flex flex-col justify-between h-[140px]">
+            <div className="flex items-center justify-between">
+                <p className="text-[14px] font-medium text-[#8E8E93]">Sinh viên Đăng ký</p>
+                <div className="w-[32px] h-[32px] rounded-[8px] bg-[#007AFF]/10 flex items-center justify-center">
+                    <Users className="w-[16px] h-[16px] text-[#007AFF]" />
+                </div>
+            </div>
+            <div>
+                <div className="flex items-baseline gap-[8px]">
+                    <h3 className="text-[28px] font-bold text-[#1C1C1E] leading-none mb-[8px]">
+                        {DASHBOARD_STATS.registrations.confirmed}</h3>
+                    <span className="text-[14px] text-[#8E8E93] font-medium">/ {totalCapacity} chỗ</span>
+                </div>
+                <p className="text-[12px] text-[#FF9500] font-medium">
+                    {DASHBOARD_STATS.registrations.pendingPayment} đang chờ thanh toán
+                </p>
+            </div>
+        </div>
+
+        <div
+            className="bg-white p-[20px] rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#E5E5EA] flex flex-col justify-between h-[140px] md:col-span-2 relative overflow-hidden">
+            <div
+                className="absolute right-0 top-0 h-full w-[40%] bg-gradient-to-l from-[#F2F2F7] to-transparent pointer-events-none">
+            </div>
+            <div className="flex items-center justify-between relative z-10">
+                <p className="text-[14px] font-medium text-[#8E8E93]">Trạng thái Check-in</p>
+                <div className="w-[32px] h-[32px] rounded-[8px] bg-[#5E5CE6]/10 flex items-center justify-center">
+                    <Activity className="w-[16px] h-[16px] text-[#5E5CE6]" />
+                </div>
+            </div>
+            <div className="flex items-end gap-[32px] relative z-10">
+                <div>
+                    <h3 className="text-[28px] font-bold text-[#1C1C1E] leading-none mb-[8px]">{totalCheckIns} <span
+                            className="text-[14px] text-[#8E8E93] font-normal">đã quét QR</span></h3>
+                    <div className="flex items-center gap-[16px]">
+                        <div className="flex items-center gap-[6px]">
+                            <div className="w-[8px] h-[8px] rounded-full bg-[#34C759]"></div>
+                            <span className="text-[12px] font-medium text-[#1C1C1E]">Hệ thống mượt:
+                                {DASHBOARD_STATS.checkIns.online}</span>
+                        </div>
+                        <div className="flex items-center gap-[6px]">
+                            <div className="w-[8px] h-[8px] rounded-full bg-[#FF3B30]"></div>
+                            <span className="text-[12px] font-medium text-[#1C1C1E]">Mất mạng/Nghẽn:
+                                {DASHBOARD_STATS.checkIns.offline}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2 className="text-[20px] font-bold text-[#1C1C1E] mb-[16px] mt-[32px]">Tiến độ phân bổ vé</h2>
+    <div
+        className="bg-white rounded-[20px] border border-[#E5E5EA] shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
+        {workshops.map(ws => {
+        const booked = ws.capacity - ws.seats_remaining;
+        const percent = (booked / ws.capacity) * 100;
+        return (
+        <div key={ws.id} className="p-[20px] border-b border-[#F2F2F7] last:border-0 flex items-center justify-between">
+            <div className="flex-1 pr-[32px]">
+                <p className="text-[15px] font-semibold text-[#1C1C1E] mb-[8px] truncate">{ws.title}</p>
+                <div className="flex items-center gap-[12px]">
+                    <div className="h-[6px] w-full max-w-[300px] bg-[#E5E5EA] rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${percent>= 100 ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'}`}
+                            style={{ width: `${percent}%` }} />
+                        </div>
+                        <span className="text-[13px] font-medium text-[#8E8E93]">
+                            Đã phân bổ {booked}/{ws.capacity}
+                        </span>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <span className={`px-[10px] py-[4px] rounded-[6px] text-[12px] font-bold ${ ws.status==='published'
+                        ? 'bg-[#34C759]/10 text-[#34C759]' : 'bg-[#E5E5EA] text-[#8E8E93]' }`}>
+                        {ws.status === 'published' ? 'Đang mở đăng ký' : 'Đang ẩn'}
+                    </span>
+                </div>
+            </div>
+            );
+            })}
+        </div>
+    </div>
+    );
+    };
+
+    const WorkshopsView = () => (
+    <div className="animate-in fade-in duration-300">
+        <div className="flex items-center justify-between mb-[32px]">
+            <h1 className="text-[32px] font-bold text-[#1C1C1E] tracking-tight">Quản lý Workshop</h1>
+            <button onClick={handleCreateNew}
+                className="bg-[#007AFF] hover:bg-[#006DEB] text-white px-[20px] py-[12px] rounded-[14px] font-semibold flex items-center gap-[8px] transition-colors shadow-[0_4px_12px_rgba(0,122,255,0.2)]">
+                <Plus className="w-[20px] h-[20px]" /> Tạo Workshop mới
+            </button>
+        </div>
+
+        <div
+            className="bg-white rounded-[24px] border border-[#E5E5EA] overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+            <div
+                className="grid grid-cols-12 gap-[16px] px-[24px] py-[16px] border-b border-[#E5E5EA] bg-[#F9F9F9] text-[13px] font-bold text-[#8E8E93] uppercase tracking-wide">
+                <div className="col-span-5">Tên sự kiện & Diễn giả</div>
+                <div className="col-span-3">Thời gian & Địa điểm</div>
+                <div className="col-span-2">Phân bổ</div>
+                <div className="col-span-2 text-right">Trạng thái</div>
+            </div>
+
+            <div className="divide-y divide-[#E5E5EA]">
+                {workshops.map(ws => {
+                const booked = ws.capacity - ws.seats_remaining;
+                return (
+                <div key={ws.id}
+                    className="grid grid-cols-12 gap-[16px] items-center px-[24px] py-[20px] hover:bg-[#F5F5F7] transition-colors cursor-pointer group"
+                    onClick={()=> handleEdit(ws)}>
+                    <div className="col-span-5 flex items-center gap-[12px]">
+                        {/* Thumbnail nhỏ ở danh sách */}
+                        <div
+                            className="w-[48px] h-[48px] rounded-[8px] bg-[#F2F2F7] border border-[#E5E5EA] shrink-0 overflow-hidden">
+                            {ws.cover_url ? (
+                            <img src={ws.cover_url} alt="Cover" className="w-full h-full object-cover" />
+                            ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <ImageIcon className="w-[16px] h-[16px] text-[#C7C7CC]" />
+                            </div>
+                            )}
+                        </div>
+                        <div>
+                            <p
+                                className="text-[15px] font-semibold text-[#1C1C1E] mb-[2px] pr-[16px] group-hover:text-[#007AFF] transition-colors">
+                                {ws.title}</p>
+                            <p className="text-[13px] text-[#8E8E93]">{ws.speaker}</p>
+                        </div>
+                    </div>
+                    <div className="col-span-3">
+                        <p className="text-[14px] text-[#1C1C1E] font-medium">{ws.day}</p>
+                        <p className="text-[13px] text-[#8E8E93] truncate pr-[16px]">{ws.room}</p>
+                    </div>
+                    <div className="col-span-2 flex flex-col justify-center">
+                        <p className="text-[14px] font-bold text-[#1C1C1E]">{booked} <span
+                                className="text-[#8E8E93] font-medium">/ {ws.capacity}</span></p>
+                    </div>
+                    <div className="col-span-2 flex items-center justify-end gap-[16px]">
+                        {ws.status === 'published' ? (
+                        <span
+                            className="bg-[#34C759]/10 text-[#34C759] text-[12px] font-bold px-[10px] py-[4px] rounded-full">Đang
+                            mở</span>
+                        ) : (
+                        <span
+                            className="bg-[#E5E5EA] text-[#8E8E93] text-[12px] font-bold px-[10px] py-[4px] rounded-full">Đang
+                            ẩn</span>
+                        )}
+                        <ChevronLeft className="w-[20px] h-[20px] text-[#C7C7CC] rotate-180" />
+                    </div>
+                </div>
+                );
+                })}
+            </div>
+        </div>
+    </div>
+    );
+
+    const EditorView = () => (
+    <div className="animate-in slide-in-from-right-8 duration-300 max-w-[1000px] pb-[100px]">
+        <button onClick={()=> setCurrentView('workshops')}
+            className="flex items-center text-[15px] font-medium text-[#8E8E93] hover:text-[#007AFF] mb-[24px]
+            transition-colors"
+            >
+            <ChevronLeft className="w-[20px] h-[20px] mr-[4px]" /> Quay lại danh sách
+        </button>
+
+        <div className="flex items-center justify-between mb-[32px]">
+            <h1 className="text-[32px] font-bold text-[#1C1C1E] tracking-tight">
+                {editingWorkshop.id.startsWith('new-') ? 'Tạo Workshop mới' : 'Chỉnh sửa Workshop'}
+            </h1>
+            {!editingWorkshop.id.startsWith('new-') && (
+            <button type="button"
+                className="flex items-center gap-[6px] text-[14px] font-semibold text-[#FF3B30] bg-white border border-[#FF3B30]/30 hover:border-[#FF3B30] hover:bg-[#FF3B30]/5 px-[16px] py-[8px] rounded-[10px] transition-all shadow-[0_2px_8px_rgba(255,59,48,0.05)]">
+                <Trash2 className="w-[18px] h-[18px]" /> Xóa sự kiện
+            </button>
+            )}
+        </div>
+
+        <form onSubmit={handleSaveWorkshop} className="space-y-[32px]">
+
+            {/* KHỐI 1: THÔNG TIN VĂN BẢN (TEXT DATA) */}
+            <div
+                className="bg-white p-[32px] rounded-[24px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#E5E5EA]">
+                <h2 className="text-[18px] font-bold text-[#1C1C1E] mb-[24px]">Thông tin chung</h2>
+                <div className="space-y-[20px]">
+                    <div>
+                        <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Tên sự kiện <span
+                                className="text-[#FF3B30]">*</span></label>
+                        <input type="text" value={editingWorkshop.title} onChange={(e)=>
+                        setEditingWorkshop({...editingWorkshop, title: e.target.value})}
+                        required
+                        className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                        text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-[20px]">
+                        <div>
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Đơn vị tổ chức /
+                                Diễn giả <span className="text-[#FF3B30]">*</span></label>
+                            <input type="text" value={editingWorkshop.speaker} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, speaker: e.target.value})}
+                            required
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Phòng / Tòa nhà
+                                <span className="text-[#FF3B30]">*</span></label>
+                            <input type="text" value={editingWorkshop.room} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, room: e.target.value})}
+                            required
+                            placeholder="VD: Giảng đường 1, Tòa nhà I"
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-[20px]">
+                        <div className="col-span-1">
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Ngày tổ
+                                chức</label>
+                            <input type="text" value={editingWorkshop.day} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, day: e.target.value})}
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                        </div>
+                        <div className="col-span-1">
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Khung giờ</label>
+                            <input type="text" value={editingWorkshop.time} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, time: e.target.value})}
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                        </div>
+                        <div className="col-span-1">
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Sức chứa
+                                (Người)</label>
+                            <input type="number" value={editingWorkshop.capacity} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, capacity: parseInt(e.target.value)})}
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                        </div>
+                        <div className="col-span-1">
+                            <label className="block text-[14px] font-medium text-[#1C1C1E] mb-[8px]">Phí tham dự
+                                (VNĐ)</label>
+                            <input type="number" value={editingWorkshop.fee_vnd} onChange={(e)=>
+                            setEditingWorkshop({...editingWorkshop, fee_vnd: parseInt(e.target.value), isFree:
+                            parseInt(e.target.value) === 0})}
+                            className="w-full h-[48px] px-[16px] bg-[#F9F9F9] border border-[#E5E5EA] rounded-[12px]
+                            text-[15px] focus:outline-none focus:border-[#007AFF] focus:bg-white transition-colors"
+                            />
+                            <p className="text-[12px] text-[#8E8E93] mt-[6px]">Để 0 nếu miễn phí</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* KHỐI 2: TÀI LIỆU TRỰC QUAN (MEDIA) - SEPARATED 2 COLUMNS */}
+            <div
+                className="bg-white p-[32px] rounded-[24px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#E5E5EA]">
+                <h2 className="text-[18px] font-bold text-[#1C1C1E] mb-[24px]">Tài liệu trực quan</h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-[32px]">
+                    {/* CỘT 1: ẢNH BÌA WORKSHOP */}
+                    <div>
+                        <label className="flex items-center gap-[8px] text-[15px] font-bold text-[#1C1C1E] mb-[8px]">
+                            <MonitorPlay className="w-[18px] h-[18px] text-[#007AFF]" /> Ảnh bìa sự kiện <span
+                                className="text-[#FF3B30]">*</span>
+                        </label>
+                        <p className="text-[13px] text-[#8E8E93] mb-[16px]">Hình đại diện hiển thị trên ứng dụng của
+                            sinh viên (Tỷ lệ 16:9).</p>
+
+                        {editingWorkshop.cover_url ? (
+                        <div
+                            className="relative w-full aspect-video rounded-[16px] overflow-hidden border border-[#E5E5EA] bg-[#F9F9F9] group">
+                            <img src={editingWorkshop.cover_url} alt="Ảnh bìa" className="w-full h-full object-cover" />
+                            <div
+                                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <button type="button" onClick={()=> setEditingWorkshop({...editingWorkshop, cover_url:
+                                    ''})}
+                                    className="bg-white px-[16px] py-[8px] rounded-[8px] text-[#FF3B30] font-medium
+                                    shadow-lg transition-transform hover:scale-105 flex items-center gap-[8px]"
+                                    >
+                                    <Trash2 className="w-[16px] h-[16px]" /> Đổi ảnh
+                                </button>
+                            </div>
+                        </div>
+                        ) : (
+                        <button type="button" onClick={handleSimulateUploadCover}
+                            className="w-full aspect-video border-2 border-dashed border-[#E5E5EA] rounded-[16px] flex flex-col items-center justify-center text-[#8E8E93] hover:bg-[#F9F9F9] hover:border-[#007AFF] hover:text-[#007AFF] transition-colors">
+                            {isUploadingCover ? (
+                            <Activity className="w-[28px] h-[28px] animate-spin mb-[12px]" />
+                            ) : (
+                            <>
+                                <ImageIcon className="w-[32px] h-[32px] mb-[12px]" />
+                                <span className="text-[14px] font-medium text-[#1C1C1E] mb-[4px]">Tải lên ảnh bìa</span>
+                                <span className="text-[12px]">.JPG, .PNG (Max 5MB)</span>
+                            </>
+                            )}
+                        </button>
+                        )}
+                    </div>
+
+                    {/* CỘT 2: SƠ ĐỒ PHÒNG HỌC */}
+                    <div>
+                        <label className="flex items-center gap-[8px] text-[15px] font-bold text-[#1C1C1E] mb-[8px]">
+                            <Map className="w-[18px] h-[18px] text-[#FF9500]" /> Sơ đồ tìm đường
+                        </label>
+                        <p className="text-[13px] text-[#8E8E93] mb-[16px]">Bản đồ hỗ trợ sinh viên tìm kiếm phòng học.
+                            Có thể bỏ trống.</p>
+
+                        {editingWorkshop.room_map_url ? (
+                        <div
+                            className="relative w-full aspect-video rounded-[16px] overflow-hidden border border-[#E5E5EA] bg-[#F9F9F9] group">
+                            <img src={editingWorkshop.room_map_url} alt="Sơ đồ phòng"
+                                className="w-full h-full object-cover" />
+                            <div
+                                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <button type="button" onClick={()=> setEditingWorkshop({...editingWorkshop,
+                                    room_map_url: ''})}
+                                    className="bg-white px-[16px] py-[8px] rounded-[8px] text-[#FF3B30] font-medium
+                                    shadow-lg transition-transform hover:scale-105 flex items-center gap-[8px]"
+                                    >
+                                    <Trash2 className="w-[16px] h-[16px]" /> Gỡ ảnh
+                                </button>
+                            </div>
+                        </div>
+                        ) : (
+                        <button type="button" onClick={handleSimulateUploadMap}
+                            className="w-full aspect-video border-2 border-dashed border-[#E5E5EA] rounded-[16px] flex flex-col items-center justify-center text-[#8E8E93] hover:bg-[#F9F9F9] hover:border-[#FF9500] hover:text-[#FF9500] transition-colors">
+                            {isUploadingMap ? (
+                            <Activity className="w-[28px] h-[28px] animate-spin mb-[12px]" />
+                            ) : (
+                            <>
+                                <ImageIcon className="w-[32px] h-[32px] mb-[12px]" />
+                                <span className="text-[14px] font-medium text-[#1C1C1E] mb-[4px]">Tải lên sơ đồ
+                                    phòng</span>
+                                <span className="text-[12px]">.JPG, .PNG (Max 5MB)</span>
+                            </>
+                            )}
+                        </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* KHỐI 3: TRỢ LÝ AI */}
+            <div
+                className="bg-gradient-to-br from-white to-[#F5F5FF] p-[32px] rounded-[24px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-[#5E5CE6]/20 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-[24px] opacity-10 pointer-events-none">
+                    <Sparkles className="w-[100px] h-[100px] text-[#5E5CE6]" />
+                </div>
+
+                <div className="relative z-10">
+                    <h2 className="text-[18px] font-bold text-[#1C1C1E] mb-[8px] flex items-center gap-[8px]">
+                        <Sparkles className="w-[20px] h-[20px] text-[#5E5CE6]" /> Tóm tắt nội dung tự động (AI)
+                    </h2>
+                    <p className="text-[14px] text-[#8E8E93] mb-[24px]">Tải lên tài liệu PDF giới thiệu. Hệ thống trí
+                        tuệ nhân tạo sẽ đọc và tự động viết lời giới thiệu ngắn gọn cho sự kiện.</p>
+
+                    {tempSummary ? (
+                    <div className="bg-white border border-[#E5E5EA] rounded-[16px] p-[20px] shadow-sm">
+                        <div className="flex justify-between items-center mb-[12px]">
+                            <span
+                                className="text-[12px] font-bold text-[#34C759] uppercase tracking-wide flex items-center gap-[4px]">
+                                <CheckCircle2 className="w-[14px] h-[14px]" /> Đã tạo văn bản thành công
+                            </span>
+                            <button type="button" onClick={()=> setTempSummary('')} className="text-[#007AFF]
+                                text-[13px] font-medium">Tải lại tệp khác</button>
+                        </div>
+                        <textarea value={tempSummary} onChange={(e)=> setTempSummary(e.target.value)}
+                  className="w-full min-h-[120px] text-[15px] text-[#1C1C1E] leading-relaxed resize-none focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-[#5E5CE6]/30 rounded-[16px] bg-white p-[32px] flex flex-col items-center justify-center text-center transition-all hover:border-[#5E5CE6] hover:bg-[#5E5CE6]/5 cursor-pointer" onClick={!isUploadingPDF && !isGeneratingAI ? handleSimulateAI : undefined}>
+                {isUploadingPDF ? (
+                  <div className="flex flex-col items-center">
+                    <Activity className="w-[32px] h-[32px] text-[#5E5CE6] animate-spin mb-[16px]" />
+                    <p className="text-[15px] font-medium text-[#1C1C1E]">Đang tải tài liệu lên máy chủ...</p>
+                  </div>
+                ) : isGeneratingAI ? (
+                  <div className="flex flex-col items-center">
+                    <Sparkles className="w-[32px] h-[32px] text-[#5E5CE6] animate-pulse mb-[16px]" />
+                    <p className="text-[15px] font-medium text-[#1C1C1E]">Hệ thống AI đang đọc và phân tích...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-[48px] h-[48px] rounded-full bg-[#5E5CE6]/10 flex items-center justify-center mb-[16px]">
+                      <UploadCloud className="w-[24px] h-[24px] text-[#5E5CE6]" />
+                    </div>
+                    <p className="text-[15px] font-medium text-[#1C1C1E] mb-[4px]">Nhấp hoặc Kéo thả tệp PDF vào đây</p>
+                    <p className="text-[13px] text-[#8E8E93]">Tài liệu dưới 10 trang (Tối đa 10MB)</p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* BOTTOM ACTION BAR */}
+        <div className="bg-white p-[20px] rounded-[24px] shadow-[0_8px_30px_rgba(0,0,0,0.08)] border border-[#E5E5EA] flex items-center justify-between sticky bottom-[24px] z-50">
+          <div className="flex items-center gap-[12px]">
+            <span className="text-[14px] font-medium text-[#1C1C1E]">Chế độ hiển thị:</span>
+            <select 
+              value={editingWorkshop.status}
+              onChange={(e) => setEditingWorkshop({...editingWorkshop, status: e.target.value})}
+              className="bg-[#F2F2F7] border-none rounded-[10px] px-[16px] py-[10px] text-[14px] font-bold text-[#1C1C1E] focus:outline-none focus:ring-2 focus:ring-[#007AFF]/20 cursor-pointer"
+            >
+              <option value="draft">Lưu nháp (Ẩn với sinh viên)</option>
+              <option value="published">Công khai (Sinh viên có thể đăng ký)</option>
+            </select>
+          </div>
+          <div className="flex gap-[12px]">
+            <button 
+              type="button" 
+              onClick={() => setCurrentView('workshops')}
+              className="px-[24px] py-[12px] rounded-[12px] text-[15px] font-semibold text-[#1C1C1E] bg-[#F2F2F7] hover:bg-[#E5E5EA] transition-colors"
+            >
+              Hủy bỏ
+            </button>
+            <button 
+              type="submit"
+              className="px-[32px] py-[12px] rounded-[12px] text-[15px] font-semibold text-white bg-[#007AFF] hover:bg-[#006DEB] transition-colors shadow-[0_4px_12px_rgba(0,122,255,0.3)]"
+            >
+              Lưu thay đổi
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#F5F5F7] font-sans flex" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif' }}>
+      <Sidebar />
+      <main className="flex-1 ml-[260px] p-[40px] overflow-y-auto h-screen relative">
+        {currentView === 'dashboard' && <DashboardView />}
+        {currentView === 'workshops' && <WorkshopsView />}
+        {currentView === 'editor' && <EditorView />}
+      </main>
+    </div>
+  );
+}
