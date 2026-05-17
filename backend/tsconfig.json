@@ -21,6 +21,18 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src", "scripts/bootstrap-admin.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/app.ts",
+    "src/workers",
+    "src/middleware/error-handler.ts",
+    "src/modules/ai-summary",
+    "src/modules/catalog",
+    "src/modules/checkin",
+    "src/modules/datasync",
+    "src/modules/payment",
+    "src/modules/registration"
+  ]
 }
