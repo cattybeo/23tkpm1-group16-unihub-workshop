@@ -82,7 +82,7 @@
 
 1. Team dev nhỏ, không over engineering.
 2. Offline capability đủ qua Service Worker + IndexedDB.
-3. Chỉ cần camera API cho QR scanner.
+3. Chỉ cần camera API để quét QR.
 4. Không phải maintain 2 codebase iOS/Android.
 
 ## Rủi ro và ràng buộc

@@ -4,7 +4,7 @@
 
 ## TLDR
 
-Hệ thống đăng ký workshop nội bộ trường ĐH. MVP 2 ngày, demo localhost, không deploy. 3 role: `student`, `organizer`, `scanner`. **Single committee**: mọi `organizer` ngang quyền trên mọi workshop. Lõi kỹ thuật: seat consistency, 12K concurrent target (design goal), offline check-in, payment resilience.
+Hệ thống đăng ký workshop nội bộ trường ĐH. MVP 2 ngày, demo localhost, không deploy. 3 role: `student`, `organizer`, `staff`. **Single committee**: mọi `organizer` ngang quyền trên mọi workshop. Lõi kỹ thuật: seat consistency, 12K concurrent target (design goal), offline check-in, payment resilience.
 
 ## Hard rules (cấm)
 
@@ -79,7 +79,7 @@ Rules tuyệt đối:
 
 Mô hình: RBAC thuần, 3 role. **KHÔNG ownership.** Middleware chain: `verifyJwt` → `loadProfile` → `requireRole([...])`. Không có middleware ownership. `loadProfile` query `profiles` mỗi request để revoke role có hiệu lực ngay.
 
-| Hành động | Endpoint | student | organizer | scanner | anon |
+| Hành động | Endpoint | student | organizer | staff | anon |
 |---|---|:-:|:-:|:-:|:-:|
 | List workshop | `GET /workshops` | Y | Y | Y | Y |
 | View public | `GET /workshops/:id` | Y | Y | Y | Y |

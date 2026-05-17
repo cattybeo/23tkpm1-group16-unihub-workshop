@@ -22,13 +22,13 @@ Hệ thống có 3 nhóm người dùng với quyền hạn khác nhau, được
 
 | Tiêu chí | RBAC | ABAC thuần |
 |---|---|---|
-| Số role cố định trong UniHub | 3 (student, organizer, scanner) | n/a |
+| Số role cố định trong UniHub | 3 (student, organizer, staff) | n/a |
 | Quyền phụ thuộc thuộc tính động? | Không (1 ngoại lệ — xem 2.2) | Có |
 | Yêu cầu policy engine (Casbin/OPA)? | Không | Có |
 | Complexity setup (dev-day) | 0.5 ngày | 2-3 ngày |
 | Đề bài có yêu cầu? | Có (gợi ý) | Không |
 
-→ **Chọn RBAC**, không ABAC thuần. Lý do: đề chỉ có 3 role fixed, không có yêu cầu policy động kiểu "chỉ sinh viên trong khoa X được đăng ký workshop của khoa X" hay "scanner chỉ check-in trong khung giờ Y". ABAC sẽ tốn 2-3 ngày setup engine cho ROI = 0.
+→ **Chọn RBAC**, không ABAC thuần. Lý do: đề chỉ có 3 role fixed, không có yêu cầu policy động kiểu "chỉ sinh viên trong khoa X được đăng ký workshop của khoa X" hay "staff chỉ check-in trong khung giờ Y". ABAC sẽ tốn 2-3 ngày setup engine cho ROI = 0.
 
 ### 2.2 Ngoại lệ: ownership của workshop
 
@@ -48,7 +48,7 @@ Implementation: kiểm tra `workshops.created_by = profiles.id của requester` 
 
 ## 3. Bảng quyền hạn (Permission Matrix)
 
-| Hành động | Endpoint | student | organizer (owner) | organizer (non-owner) | scanner | anon |
+| Hành động | Endpoint | student | organizer (owner) | organizer (non-owner) | staff | anon |
 |---|---|---|---|---|---|---|
 | Xem danh sách workshop public | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Xem chi tiết workshop public | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -211,7 +211,7 @@ Test cases để verify spec hoạt động đúng (Vitest):
 
 1. **Anon truy cập endpoint cần auth** → 401 (không phải 403).
 2. **Student gọi `POST /workshops`** → 403 với `code: FORBIDDEN_ROLE`.
-3. **Scanner gọi `POST /workshops`** → 403.
+3. **Staff gọi `POST /workshops`** → 403.
 4. **Organizer A tạo workshop X → organizer B gọi `PATCH /workshops/X`** → 403 với `code: FORBIDDEN_OWNERSHIP`.
 5. **Organizer A gọi `PATCH /workshops/X` của chính mình** → 200.
 6. **Student gọi `GET /registrations/me`** → trả về CHỈ registration của student đó (không leak của người khác).
@@ -298,7 +298,7 @@ export async function loadProfile(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-export function requireRole(roles: ('student' | 'organizer' | 'scanner')[]) {
+export function requireRole(roles: ('student' | 'organizer' | 'staff')[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({

@@ -104,7 +104,7 @@ Thư viện biểu đồ: **Recharts** (đã có trong stack, không thêm depen
 | Query DB timeout (> 5s) | Trả **503** `STATS_UNAVAILABLE` — FE hiển thị "Đang tải, thử lại sau" |
 | Chưa có dữ liệu (0 workshop) | Trả 200 với tất cả số liệu = 0, FE hiển thị empty state |
 | BE restart (mất cache in-memory) | Request đầu sau restart hit DB bình thường, cache warm lại trong < 1s |
-| Student hoặc scanner truy cập | **403** `FORBIDDEN_ROLE` |
+| Student hoặc staff truy cập | **403** `FORBIDDEN_ROLE` |
 | Workshop bị huỷ | Vẫn xuất hiện trong bảng với trạng thái `cancelled`, không tính vào `seats_remaining` |
 | `fill_rate` hoặc `attendance_rate` có mẫu số = 0 | `NULLIF(_, 0)` trả `NULL`, FE hiển thị `—` thay vì crash |
 
@@ -125,7 +125,7 @@ Thư viện biểu đồ: **Recharts** (đã có trong stack, không thêm depen
 1. Organizer gọi `GET /admin/stats` → **200** với đủ các trường `summary`, `workshopStats`, `registrationTimeline`, `topWorkshops`, `csvImport`.
 2. Sau khi 1 sinh viên đăng ký xác nhận → trong vòng **60 giây**, `totalConfirmedRegistrations` trong response tăng thêm 1.
 3. Sau khi check-in → `totalCheckIns` tăng và `attendanceRate` được cập nhật trong vòng 60 giây.
-4. Student hoặc scanner gọi endpoint → **403**.
+4. Student hoặc staff gọi endpoint → **403**.
 5. Click vào row workshop trên bảng → hiển thị danh sách sinh viên đã đăng ký kèm trạng thái check-in (`checkedIn: true/false`).
 6. Workshop có 0 đăng ký → `fillRate` và `attendanceRate` hiển thị `—` (không crash do chia cho 0).
 7. Biểu đồ Registration Timeline hiển thị đúng số lượt đăng ký theo giờ, giờ đông nhất được highlight rõ.

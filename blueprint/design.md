@@ -121,7 +121,7 @@ Hệ thống có 3 role cố định. Đề bài gợi ý RBAC và nhóm chọn 
 
 ### Nhóm người dùng và quyền hạn
 
-| Hành động | Endpoint | student | organizer | scanner | anon |
+| Hành động | Endpoint | student | organizer | staff | anon |
 |---|---|---|---|---|---|
 | Xem danh sách workshop | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ |
 | Xem chi tiết workshop đã publish | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ |

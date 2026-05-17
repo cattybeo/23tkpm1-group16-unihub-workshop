@@ -45,7 +45,7 @@
 |---|---|---|---|
 | `tailwindcss` | ^3.4.0 | Utility-first CSS | Không cần viết CSS file riêng, dễ responsive |
 | `lucide-react` | ^1.16.0 | Icon set | Nhẹ, tree-shakeable, consistent design |
-| `html5-qrcode` | ^2.3.8 | QR scanner (camera) | Hỗ trợ iOS Safari WebRTC camera API, đủ cho check-in |
+| `html5-qrcode` | ^2.3.8 | Quét QR (camera) | Hỗ trợ iOS Safari WebRTC camera API, đủ cho check-in |
 | `autoprefixer` + `postcss` | ^10.4.0 / ^8.4.0 | CSS toolchain | Bắt buộc để Tailwind build đúng |
 
 ### PWA & Offline
