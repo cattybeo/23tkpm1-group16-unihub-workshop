@@ -11,6 +11,8 @@ export interface Workshop {
   isFree: boolean;
   image: string;
   aiSummary: string;
+  cover_image_url?: string;
+  room_map_url?: string;
 }
 
 export interface Ticket {
