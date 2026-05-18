@@ -1,14 +1,16 @@
 import { z } from 'zod'
 
-const MssvSchema = z.string().trim().regex(/^[A-Za-z0-9]{6,20}$/, 'MSSV không hợp lệ.')
-const AccountSchema = z.string().trim().min(1, 'Vui lòng nhập tài khoản.').max(254, 'Tài khoản quá dài.').refine(
-  value => MssvSchema.safeParse(value).success || z.string().email().safeParse(value).success,
-  'Tài khoản phải là MSSV hoặc email hợp lệ.',
-)
+const AccountSchema = z.string().trim().min(1, 'Vui lòng nhập tài khoản.').max(254, 'Tài khoản quá dài.')
+const PasswordSchema = z.string().min(1, 'Vui lòng nhập mật khẩu.').max(128, 'Mật khẩu quá dài.')
 
-export const LoginFormSchema = z.object({
+export const StudentLoginFormSchema = z.object({
   account: AccountSchema,
-  password: z.string().min(1, 'Vui lòng nhập mật khẩu.').max(128, 'Mật khẩu quá dài.'),
+  password: PasswordSchema,
+})
+
+export const StaffLoginFormSchema = z.object({
+  account: AccountSchema.refine((value) => value.includes('@'), 'Tài khoản nhân viên phải là email.'),
+  password: PasswordSchema,
 })
 
 export const ChangePasswordFormSchema = z.object({

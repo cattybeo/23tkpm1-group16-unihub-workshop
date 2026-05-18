@@ -2,11 +2,17 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { AlertCircle, Check, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth-context'
-import { LoginFormSchema, firstZodMessage } from '../lib/auth-validation'
+import { StudentLoginFormSchema, firstZodMessage } from '../lib/auth-validation'
 import hcmusLogo from '../../../img/hcmus-logo.png'
 
+function getHomeRoute(role: 'student' | 'organizer' | 'staff'): string {
+  if (role === 'staff') return '/staff'
+  if (role === 'organizer') return '/admin'
+  return '/'
+}
+
 export default function LoginPage() {
-  const { loginWithMssv, loading: authLoading, profile, session } = useAuth()
+  const { loginWithAccount, loading: authLoading, profile, session } = useAuth()
   const navigate = useNavigate()
   const submittedRef = useRef(false)
 
@@ -37,14 +43,14 @@ export default function LoginPage() {
     if (!submittedRef.current) return
     if (authLoading || !session) return
     if (!profile) return
-    navigate(profile?.must_change_password ? '/change-password' : '/', { replace: true })
+    navigate(profile.must_change_password ? '/change-password' : getHomeRoute(profile.role), { replace: true })
   }, [authLoading, navigate, profile?.must_change_password, session])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
 
-    const parsed = LoginFormSchema.safeParse({ account: account, password })
+    const parsed = StudentLoginFormSchema.safeParse({ account: account, password })
     if (!parsed.success) {
       setError(firstZodMessage(parsed.error))
       return
@@ -54,7 +60,9 @@ export default function LoginPage() {
     submittedRef.current = true
 
     try {
-      const { profile: loginProfile, error: loginErr } = await loginWithMssv(parsed.data.account, parsed.data.password)
+      const { profile: loginProfile, error: loginErr } = await loginWithAccount(parsed.data.account, parsed.data.password, {
+        loginType: 'student',
+      })
 
       if (loginErr) {
         submittedRef.current = false
@@ -63,7 +71,12 @@ export default function LoginPage() {
       }
 
       setSuccess(true)
-      navigate(loginProfile?.must_change_password === true ? '/change-password' : '/', { replace: true })
+      navigate(
+        loginProfile?.must_change_password === true
+          ? '/change-password'
+          : getHomeRoute(loginProfile?.role ?? 'student'),
+        { replace: true }
+      )
     } catch {
       submittedRef.current = false
       setError('Không thể kết nối. Vui lòng thử lại.')
@@ -192,12 +205,13 @@ export default function LoginPage() {
 
                 <button
                   type="button"
+                  onClick={() => navigate('/staff-login')}
                   className="flex h-[52px] w-full items-center justify-center gap-[10px] rounded-[14px] border border-[#D1D1D6] bg-white text-[16px] font-semibold text-[#1C1C1E] transition hover:bg-[#F2F2F7] active:scale-[0.99] focus:outline-none focus:ring-4 focus:ring-[#007AFF]/15"
                 >
                   <span className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-[8px] bg-white">
                     <img src={hcmusLogo} alt="" className="h-[26px] w-[26px] object-contain" />
                   </span>
-                  Đăng nhập với Student Email
+                  Đăng nhập tài khoản nhân viên
                 </button>
               </form>
             </div>

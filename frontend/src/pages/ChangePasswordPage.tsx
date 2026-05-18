@@ -35,7 +35,7 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="flex-1 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">Đổi mật khẩu</h1>
         <p className="text-sm text-gray-500 mb-6">
@@ -78,7 +78,15 @@ export default function ChangePasswordPage() {
             disabled={loading}
             className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'Đang lưu...' : 'Xác nhận đổi mật khẩu'}
+            {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Đang lưu...
+            </span>
+          ) : 'Xác nhận đổi mật khẩu'}
           </button>
         </form>
       </div>

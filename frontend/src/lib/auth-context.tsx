@@ -1,23 +1,23 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
-import { supabase } from './supabase'
-
-const EMAIL_DOMAIN = 'students.unihub.internal'
-
-export function mssvToEmail(mssv: string) {
-  return `${mssv.trim()}@${EMAIL_DOMAIN}`
-}
-
-function resolveEmail(account: string): string {
-  return account.includes('@') ? account.trim() : `${account.trim()}@${EMAIL_DOMAIN}`
-}
+import { supabase, syncSupabaseAccessToken } from './supabase'
+import { clearAuth, setAuth } from './auth-store'
+import { api } from './api-client'
 
 interface Profile {
   id: string
+  email: string | null
   role: 'student' | 'organizer' | 'staff'
   mssv: string | null
   display_name: string
+  phone: string | null
   must_change_password: boolean
+}
+
+interface LoginResponse {
+  session: { access_token: string; expires_at: number | null }
+  user: User
+  profile: Profile
 }
 
 interface AuthState {
@@ -28,9 +28,14 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  loginWithMssv: (mssv: string, password: string) => Promise<{ profile: Profile | null; error: string | null }>
+  loginWithAccount: (
+    account: string,
+    password: string,
+    options?: { loginType?: 'student' | 'staff' }
+  ) => Promise<{ profile: Profile | null; error: string | null }>
   logout: () => Promise<void>
   completePasswordChange: (newPassword: string) => Promise<{ error: string | null }>
+  updateProfile: (patch: { email?: string; display_name?: string; phone?: string | null }) => Promise<{ profile: Profile | null; error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -43,85 +48,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading: true,
   })
 
-  const loadProfile = useCallback(async (userId: string): Promise<Profile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, role, mssv, display_name, must_change_password')
-      .eq('id', userId)
-      .maybeSingle()
-
-    if (error || !data) return null
-    return data as Profile | null
-  }, [])
-
-  const applySession = useCallback(async (session: Session | null) => {
-    const profile = session ? await loadProfile(session.user.id) : null
-    if (session && !profile) {
-      setState({ session: null, user: null, profile: null, loading: false })
-      await supabase.auth.signOut()
-      return
-    }
-
-    setState({ session, user: session?.user ?? null, profile, loading: false })
-  }, [loadProfile])
-
   useEffect(() => {
     let active = true
-
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    ;(async () => {
+      const refreshed = await api.refresh()
       if (!active) return
-      await applySession(session)
-    })
+      if (!refreshed) {
+        clearAuth()
+        setState({ session: null, user: null, profile: null, loading: false })
+        return
+      }
+      setState({
+        session: { access_token: refreshed.access_token } as unknown as Session,
+        user: refreshed.user,
+        profile: refreshed.profile as Profile,
+        loading: false,
+      })
+    })()
+    return () => { active = false }
+  }, [])
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      window.setTimeout(() => {
-        if (!active) return
-        void applySession(session)
-      }, 0)
-    })
+  useEffect(() => {
+    void syncSupabaseAccessToken(state.session?.access_token ?? null)
+  }, [state.session?.access_token])
 
-    return () => {
-      active = false
-      subscription.unsubscribe()
-    }
-  }, [applySession])
+  async function loginWithAccount(
+    account: string,
+    password: string,
+    options?: { loginType?: 'student' | 'staff' },
+  ) {
+    const loginType = options?.loginType ?? 'student'
 
-  async function loginWithMssv(mssv: string, password: string) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: resolveEmail(mssv),
-      password,
-    })
+    try {
+      const data = await api.post<LoginResponse>('/auth/login', { account, password, login_type: loginType })
+      setAuth(data.user, data.session.access_token)
+      setState({
+        session: { access_token: data.session.access_token } as unknown as Session,
+        user: data.user,
+        profile: data.profile,
+        loading: false,
+      })
+      return { profile: data.profile, error: null }
+    } catch (err) {
+      const code = typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code ?? '').toUpperCase()
+        : ''
+      const msg = err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message?: unknown }).message ?? '')
+        : ''
 
-    if (error || !data.session) {
-      const msg = error?.message ?? ''
+      if (code === 'FORBIDDEN_ROLE') {
+        return { profile: null, error: 'Tài khoản này không có quyền nhân viên hoặc ban tổ chức.' }
+      }
+
+      if (code === 'INVALID_EMAIL' || code === 'INVALID_STUDENT_EMAIL') {
+        return {
+          profile: null,
+          error: loginType === 'staff'
+            ? 'Email tài khoản không đúng định dạng.'
+            : 'Email đăng nhập không đúng định dạng.',
+        }
+      }
+
+      const normalized = msg.toLowerCase()
       const vietnameseError =
-        msg.toLowerCase().includes('invalid login') || msg.toLowerCase().includes('invalid credentials')
+        code === 'AUTH_LOGIN_FAILED' || normalized.includes('invalid login') || normalized.includes('invalid credentials')
           ? 'Tài khoản hoặc mật khẩu không đúng.'
-          : msg.toLowerCase().includes('email not confirmed')
+          : normalized.includes('email not confirmed')
           ? 'Tài khoản chưa được xác nhận.'
-          : msg.toLowerCase().includes('too many requests')
+          : normalized.includes('too many requests')
           ? 'Quá nhiều lần thử. Vui lòng thử lại sau.'
           : msg || 'Đăng nhập thất bại.'
+
       return { profile: null, error: vietnameseError }
     }
-
-    const profile = await loadProfile(data.session.user.id)
-    if (!profile) {
-      await supabase.auth.signOut()
-      setState({ session: null, user: null, profile: null, loading: false })
-      return { profile: null, error: 'Không tìm thấy hồ sơ tài khoản. Vui lòng liên hệ ban tổ chức.' }
-    }
-
-    setState({ session: data.session, user: data.session.user, profile, loading: false })
-
-    return { profile, error: null }
   }
 
   async function logout() {
-    await supabase.auth.signOut()
+    try {
+      await api.post('/auth/logout', {})
+    } catch {
+      // logout phải success local dù network fail
+    }
+    clearAuth()
+    setState({ session: null, user: null, profile: null, loading: false })
   }
 
   async function completePasswordChange(newPassword: string) {
+    if (!state.user) return { error: 'Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.' }
+
     const { error: authErr } = await supabase.auth.updateUser({ password: newPassword })
     if (authErr) return { error: authErr.message }
 
@@ -132,13 +149,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (profileErr) return { error: profileErr.message }
 
-    // Cập nhật local state
     setState(s => s.profile ? { ...s, profile: { ...s.profile, must_change_password: false } } : s)
     return { error: null }
   }
 
+  async function updateProfile(patch: { email?: string; display_name?: string; phone?: string | null }) {
+    try {
+      const profile = await api.patch<Profile>('/auth/me', patch)
+      const refreshed = await api.refresh()
+      const nextSession = refreshed
+        ? ({ access_token: refreshed.access_token } as unknown as Session)
+        : state.session
+      const nextUser = refreshed?.user ?? state.user
+
+      if (refreshed && nextUser) {
+        setAuth(nextUser, refreshed.access_token)
+      }
+
+      setState(s => ({
+        ...s,
+        session: nextSession,
+        user: nextUser,
+        profile,
+        loading: false,
+      }))
+
+      return { profile, error: null }
+    } catch (err) {
+      const msg = err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message?: unknown }).message ?? '')
+        : 'Cập nhật thông tin thất bại.'
+      return { profile: null, error: msg }
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ ...state, loginWithMssv, logout, completePasswordChange }}>
+    <AuthContext.Provider value={{ ...state, loginWithAccount, logout, completePasswordChange, updateProfile }}>
       {children}
     </AuthContext.Provider>
   )

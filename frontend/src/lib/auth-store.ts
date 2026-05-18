@@ -1,10 +1,11 @@
-let ramToken: string | null = null;
-let ramUser: any | null = null;
+import type { User } from '@supabase/supabase-js';
 
-export const setAuth = (user: any, token: string) => {
+let ramToken: string | null = null;
+let ramUser: User | null = null;
+
+export const setAuth = (user: User, token: string) => {
   ramToken = token;
   ramUser = user;
-  console.log("🔑 [Auth] Token đã được nạp vào RAM.");
 };
 
 export const getAuthToken = () => ramToken;
