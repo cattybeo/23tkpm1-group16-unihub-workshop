@@ -266,7 +266,12 @@ export async function revokeSession(userId: string): Promise<ServiceResult<{ ok:
   return { data: { ok: true }, error: null }
 }
 
-export async function completePasswordChange(user: AuthenticatedProfile): Promise<ServiceResult<ProfileDto>> {
+export async function completePasswordChange(user: AuthenticatedProfile, newPassword: string): Promise<ServiceResult<ProfileDto>> {
+  const { error: authError } = await supabase.auth.admin.updateUserById(user.id, { password: newPassword })
+  if (authError) {
+    return { data: null, error: profileResultError('PROFILE_UPDATE_FAILED', authError.message) }
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .update({ must_change_password: false })

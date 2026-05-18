@@ -40,7 +40,9 @@ const LoginSchema = z.object({
   login_type: z.enum(['student', 'staff']).optional(),
 }).strict()
 
-const EmptyBodySchema = z.object({}).strict()
+const ChangePasswordSchema = z.object({
+  newPassword: z.string().min(6).max(256),
+}).strict()
 
 router.post('/login', async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body)
@@ -130,13 +132,13 @@ router.patch('/me', verifyJwt, loadProfile, async (req, res) => {
 })
 
 router.post('/change-password/complete', verifyJwt, loadProfile, async (req, res) => {
-  const parsed = EmptyBodySchema.safeParse(req.body ?? {})
+  const parsed = ChangePasswordSchema.safeParse(req.body ?? {})
   if (!parsed.success) {
     sendError(res, 400, 'VALIDATION_FAILED', 'Invalid change-password completion payload', parsed.error.flatten())
     return
   }
 
-  const result = await completePasswordChange(req.user!)
+  const result = await completePasswordChange(req.user!, parsed.data.newPassword)
   if (result.error || !result.data) {
     sendError(res, 500, 'PROFILE_UPDATE_FAILED', result.error?.message ?? 'Password change completion failed')
     return

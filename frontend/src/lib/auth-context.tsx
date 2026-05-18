@@ -139,18 +139,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function completePasswordChange(newPassword: string) {
     if (!state.user) return { error: 'Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.' }
 
-    const { error: authErr } = await supabase.auth.updateUser({ password: newPassword })
-    if (authErr) return { error: authErr.message }
-
-    const { error: profileErr } = await supabase
-      .from('profiles')
-      .update({ must_change_password: false })
-      .eq('id', state.user!.id)
-
-    if (profileErr) return { error: profileErr.message }
-
-    setState(s => s.profile ? { ...s, profile: { ...s.profile, must_change_password: false } } : s)
-    return { error: null }
+    try {
+      await api.post('/auth/change-password/complete', { newPassword })
+      setState(s => s.profile ? { ...s, profile: { ...s.profile, must_change_password: false } } : s)
+      return { error: null }
+    } catch (err) {
+      const msg = err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message?: unknown }).message ?? '')
+        : 'Đổi mật khẩu thất bại.'
+      return { error: msg }
+    }
   }
 
   async function updateProfile(patch: { email?: string; display_name?: string; phone?: string | null }) {
