@@ -104,7 +104,7 @@ L   B  │workshops │regist.   │idem_keys│check_ins│notif.    │student
        └──────────┴──────────┴─────────┴─────────┴──────────┴─────────┘
 
 Cross-cutting middleware:
-  verifyJwt → loadProfile → requireRole([...]) → (requireOwnership)
+  verifyJwt → loadProfile → requireRole([...])
   Rate Limit (Token Bucket) · Idempotency · Logger · Error handler
 ```
 
@@ -185,6 +185,8 @@ Xem sơ đồ C4 Level 1, Level 2 và High-Level Architecture tại [`blueprint/
 
 ```
 unihub-workshop/
+├── .env                         # ⚠️ Không commit — tải tại link MediaFire ở mục Cài đặt
+├── .env.example                 # Template mô tả từng biến
 ├── blueprint/                   # Tài liệu thiết kế (Phần 1 — Blueprint)
 │   ├── proposal.md              # Bối cảnh, vấn đề, mục tiêu, phạm vi, rủi ro
 │   ├── design.md                # Kiến trúc, C4 Diagram, DB Schema, 13 ADR
@@ -202,29 +204,28 @@ unihub-workshop/
 │       └── workshop-management.md
 ├── backend/                     # Express + TypeScript
 │   ├── src/
-│   │   ├── controllers/         # Xử lý request/response
+│   │   ├── modules/             # Bounded contexts: catalog, registration, payment, checkin, notify, ai-summary
+│   │   ├── routes/              # Entry HTTP handlers (Zod validation, route mounting)
 │   │   ├── services/            # Business logic
-│   │   ├── repositories/        # Database access (chỉ gọi qua service interface)
-│   │   ├── middlewares/         # verifyJwt, loadProfile, requireRole, rate limit, idempotency
+│   │   ├── middleware/          # verifyJwt, loadProfile, requireRole, idempotency, error-handler
+│   │   ├── infra/               # Adapters: supabase client, event-bus, payment gateway
+│   │   ├── shared/              # Zod schemas dùng chung FE/BE
 │   │   └── workers/             # Cron: CSV nightly (02:00), seat TTL release (mỗi 60s)
-│   ├── .env.example
 │   ├── package.json
 │   └── tsconfig.json
 ├── frontend/                    # React PWA
 │   ├── src/
-│   │   ├── components/          # Header, MobileNav, WorkshopCard, CapacityIndicator
-│   │   ├── pages/               # DiscoverPage, WorkshopDetailPage, MyTicketsPage
-│   │   ├── lib/                 # mock-data.ts, tickets-context.tsx
-│   │   └── types/               # workshop.ts (Workshop, Ticket interfaces)
-│   ├── .env.example
+│   │   ├── components/          # Header, MobileNav, WorkshopCard, CapacityIndicator, UserMenu
+│   │   ├── pages/               # DiscoverPage, WorkshopDetailPage, MyTicketsPage, AdminPage, StaffPage, ...
+│   │   ├── lib/                 # api-client, auth-context, tickets-context, supabase client
+│   │   └── types/               # workshop.ts, staff.ts (TS interfaces)
 │   ├── package.json
-│   └── vite.config.ts           # PWA config, proxy /api → :3000
+│   └── vite.config.ts           # PWA config, envDir → root, proxy /api → :3000
 ├── supabase/
-│   ├── db_schema.sql            # Full schema idempotent — single source of truth
-│   └── seed.sql                 # Dữ liệu mẫu (6 user, 4 workshop, 5 registration...)
+│   └── db_schema.sql            # Full schema idempotent — single source of truth
 ├── legacy-data/
 │   ├── README.md                # Format CSV nightly, logic import
-│   └── students_nightly_2026-05-13.csv   # File CSV mẫu (4 sinh viên)
+│   └── students_nightly_2026-05-17.csv   # File CSV mẫu
 ├── docs/
 │   └── techstack.md             # Lý do chọn từng dependency
 ├── img/                         # Diagram: C4 Level 1/2, DB schema, high-level (PNG + SVG)
@@ -269,12 +270,19 @@ cd backend && npm install && cd ..
 
 ### 4. Cấu hình biến môi trường
 
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+Tải file `.env` đã cấu hình sẵn tại: **[https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file](https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file)**
+
+Đặt file tại **thư mục gốc** của project (ngang hàng với `README.md`):
+
+```
+unihub-workshop/
+├── .env          ← đặt tại đây
+├── frontend/
+├── backend/
+└── ...
 ```
 
-Điền vào `.env` (xem chi tiết tại mục [Biến môi trường](#biến-môi-trường)).
+Xem mô tả từng biến tại [`.env.example`](.env.example) hoặc mục [Biến môi trường](#biến-môi-trường) bên dưới.
 
 ### 5. Khởi tạo database
 
@@ -301,14 +309,16 @@ cd frontend && npm run dev
 
 ## Biến môi trường
 
-### `backend/.env`
+Tất cả biến môi trường nằm trong **một file `.env` duy nhất ở thư mục gốc**. Tải file đã cấu hình sẵn tại: [https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file](https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file)
+
+Xem toàn bộ biến và giải thích tại [`.env.example`](.env.example). Các biến quan trọng:
 
 ```env
+# Supabase (backend dùng SUPABASE_*, frontend dùng VITE_SUPABASE_*)
 SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...    # ⚠️ Chỉ backend, không commit, không đưa ra FE
-
-OPENAI_API_KEY=sk-...               # Bỏ trống nếu không dùng AI Summary
+SUPABASE_SERVICE_ROLE_KEY=eyJ...    # ⚠️ Chỉ backend đọc — không bao giờ commit
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...       # Public, an toàn để Vite bundle vào FE
 
 # Mock payment fail rate: 0.0 = luôn thành công, 1.0 = luôn thất bại (test circuit breaker)
 PAYMENT_MOCK_FAIL_RATE=0
@@ -317,15 +327,7 @@ PORT=3000
 NODE_ENV=development
 ```
 
-### `frontend/.env`
-
-```env
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJ...
-VITE_API_URL=http://localhost:3000
-```
-
-> ⚠️ `SUPABASE_SERVICE_ROLE_KEY` bypass toàn bộ RLS — **chỉ đặt trong `backend/.env`**, không bao giờ đưa vào FE bundle hoặc commit.
+> **Tại sao 1 file?** Backend đọc qua `--env-file=../.env` (chạy từ `backend/`). Frontend đọc qua Vite `envDir` trỏ về root. `VITE_*` vars được Vite inject vào browser bundle — chỉ đặt public keys vào đây.
 
 ---
 
@@ -337,7 +339,7 @@ Schema đầy đủ tại [`supabase/db_schema.sql`](supabase/db_schema.sql) —
 |------|---------|-----------------|
 | `students` | Whitelist sinh viên từ CSV nightly | PK = `mssv` (không dùng UUID surrogate). `is_active` cho soft-delete. Constraint `mssv_format: ^[A-Za-z0-9]{6,20}$` |
 | `profiles` | Tài khoản, liên kết `auth.users` | Lưu `role`, `mssv` (FK → students, bắt buộc nếu role=student), `must_change_password` |
-| `workshops` | Workshop | `seats_remaining`, `is_published`, `cancelled_at` (soft-delete), `created_by` (FK → profiles, dùng cho ownership check), `cover_image_url`, `room_map_url`, `pdf_url`, `summary_md`, `summary_generated_at` |
+| `workshops` | Workshop | `seats_remaining`, `is_published`, `cancelled_at` (soft-delete), `cover_image_url`, `room_map_url`, `pdf_url`, `summary_md`, `summary_generated_at` |
 | `registrations` | Đăng ký | FK `mssv` → students (không phải student_id). Status enum: `pending_payment / confirmed / cancelled / expired`. Constraint: **EXCLUDE USING BTREE (mssv, workshop_id) WHERE status IN ('pending_payment','confirmed')** — cho phép đăng ký lại sau khi cancel/expired |
 | `payments` | Lịch sử thanh toán | Tách khỏi registrations vì 1 registration có thể có nhiều payment attempt (CB open→close) |
 | `idempotency_keys` | Chống duplicate request | PK = `key` (text). TTL 24h xử lý ở application layer |
@@ -393,30 +395,11 @@ PAYMENT_MOCK_FAIL_RATE=1.0   # 100% fail → CB mở sau ngưỡng 50%
 
 ---
 
-## Trạng thái implementation hiện tại
-
-> ⚠️ **Quan trọng:** Frontend hiện tại đang dùng **mock data** (`src/lib/mock-data.ts`), chưa kết nối API backend thực. Đây là trạng thái phát triển dở — backend được thiết kế đầy đủ nhưng FE integration chưa hoàn thiện.
-
-**Frontend (mock data):**
-- `DiscoverPage`: hiển thị danh sách workshop từ `MOCK_WORKSHOPS`
-- `WorkshopDetailPage`: xem chi tiết, đăng ký với mock payment (20% fail random, setTimeout 2s)
-- `MyTicketsPage`: quản lý vé qua React Context (`tickets-context.tsx`)
-- Auth, Realtime, QR scanner: chưa kết nối
-
-**Backend (thiết kế đầy đủ):** Schema, spec, middleware, cơ chế kỹ thuật đã được thiết kế và document hoàn chỉnh trong `blueprint/`.
-
 ---
 
 ## Phân quyền (RBAC)
 
-> **Lưu ý — mâu thuẫn nội bộ về ownership check:**
-> - `design.md` + `full-guide.md` (tuyên bố là nguồn thắng khi mâu thuẫn): **KHÔNG ownership** — single committee, mọi organizer ngang quyền, không có `FORBIDDEN_OWNERSHIP`
-> - `auth.md`, `access-control.md`, `workshop-management.md`: **CÓ ownership** — organizer chỉ sửa/hủy workshop do mình tạo
-> - `db_schema.sql`: **có cột `created_by`** trong bảng `workshops`
->
-> Backend chưa được implement (FE đang dùng mock data), nên khi implement cần thống nhất theo một nguồn. Khuyến nghị theo `design.md` (tài liệu Blueprint chính thức, Phần 1 đồ án): **không có ownership check**.
-
-**Middleware chain (theo `design.md`):** `verifyJwt → loadProfile → requireRole([...])`
+**Middleware chain:** `verifyJwt → loadProfile → requireRole([...])`
 
 `loadProfile` query DB mỗi request (không đọc từ JWT claim) → đổi role có hiệu lực ngay, không cần đợi token expire.
 
@@ -476,9 +459,9 @@ Prefix `/api/v1/`. Response envelope thống nhất:
 GET    /api/v1/workshops                     # Public, no auth
 GET    /api/v1/workshops/:id
 POST   /api/v1/workshops                     # [organizer]
-PATCH  /api/v1/workshops/:id                 # [organizer + owner]
-DELETE /api/v1/workshops/:id                 # [organizer + owner]  soft-delete
-POST   /api/v1/workshops/:id/summary         # [organizer + owner]  upload PDF → 202 async
+PATCH  /api/v1/workshops/:id                 # [organizer]
+DELETE /api/v1/workshops/:id                 # [organizer]  soft-delete
+POST   /api/v1/workshops/:id/summary         # [organizer]  upload PDF → 202 async
 
 # Registration  — BẮT BUỘC header: Idempotency-Key: <uuid>
 POST   /api/v1/registrations                 # [student]
