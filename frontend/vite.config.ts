@@ -9,9 +9,8 @@ export default defineConfig({
     basicSsl(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      // Tắt SW khi dev để tránh conflict cache
-      devOptions: { enabled: false },
+      registerType: 'prompt',
+      devOptions: { enabled: true, type: 'module' },
       manifest: {
         name: 'UniHub Workshop',
         short_name: 'UniHub',
@@ -27,6 +26,7 @@ export default defineConfig({
       workbox: {
         // Precache app shell + check-in page
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: '/index.html',
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
