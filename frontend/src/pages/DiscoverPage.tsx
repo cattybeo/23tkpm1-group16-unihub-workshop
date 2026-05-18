@@ -1,10 +1,40 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import { MOCK_WORKSHOPS } from '@/lib/mock-data';
 import { WorkshopCard } from '@/components/WorkshopCard';
+import { api } from '@/lib/api-client';
+import { supabase } from '@/lib/supabase';
+import { type WorkshopRow, workshopRowToDisplay } from '@/types/workshop';
 
 export function DiscoverPage() {
   const navigate = useNavigate();
+  const [workshops, setWorkshops] = useState<WorkshopRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<WorkshopRow[]>('/workshops')
+      .then(setWorkshops)
+      .catch(() => setError('Không thể tải danh sách workshop. Vui lòng thử lại.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('workshops-discover')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'workshops' },
+        payload => {
+          const next = payload.new as Partial<WorkshopRow> & { id: string };
+          setWorkshops(prev => prev.map(row => (row.id === next.id ? { ...row, ...next } : row)));
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
 
   return (
     <div className="animate-in fade-in duration-500 pb-[100px] md:pb-[40px]">
@@ -49,15 +79,28 @@ export function DiscoverPage() {
       </section>
 
       <section className="max-w-[1200px] mx-auto px-[20px] md:px-[40px]">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px]">
-          {MOCK_WORKSHOPS.map((ws) => (
-            <WorkshopCard
-              key={ws.id}
-              workshop={ws}
-              onClick={() => navigate(`/workshop/${ws.id}`)}
-            />
-          ))}
-        </div>
+        {loading && (
+          <div className="flex justify-center py-[80px]">
+            <div className="w-8 h-8 border-4 border-[#007AFF] border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+        {error && (
+          <p className="text-center text-[#FF3B30] py-[40px]">{error}</p>
+        )}
+        {!loading && !error && workshops.length === 0 && (
+          <p className="text-center text-[#8E8E93] py-[40px]">Chưa có workshop nào được publish.</p>
+        )}
+        {!loading && !error && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px]">
+            {workshops.map((ws) => (
+              <WorkshopCard
+                key={ws.id}
+                workshop={workshopRowToDisplay(ws)}
+                onClick={() => navigate(`/workshop/${ws.id}`)}
+              />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
