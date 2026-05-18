@@ -1,20 +1,23 @@
 import { z } from 'zod'
 import { supabase } from '../lib/supabase.js'
+import { eventBus, WORKSHOP_CHANGED_EVENT, type WorkshopChangedEvent } from '../infra/event-bus.js'
 
 // ---------------------------------------------------------------------------
 // Zod schemas (dùng cho cả FE shared nếu cần)
 // ---------------------------------------------------------------------------
 
 export const CreateWorkshopSchema = z.object({
-  title:        z.string().min(1).max(200),
-  description:  z.string().optional(),
-  speaker_name: z.string().min(1).max(100),
-  speaker_bio:  z.string().optional(),
-  room:         z.string().min(1).max(100),
-  start_time:   z.string().datetime({ offset: true }),
-  end_time:     z.string().datetime({ offset: true }),
-  capacity:     z.number().int().min(1),
-  fee_vnd:      z.number().int().min(0).default(0),
+  title:           z.string().min(1).max(200),
+  description:     z.string().optional(),
+  speaker_name:    z.string().min(1).max(100),
+  speaker_bio:     z.string().optional(),
+  room:            z.string().min(1).max(100),
+  start_time:      z.string().datetime({ offset: true }),
+  end_time:        z.string().datetime({ offset: true }),
+  capacity:        z.number().int().min(1),
+  fee_vnd:         z.number().int().min(0).default(0),
+  cover_image_url: z.string().url().optional(),
+  room_map_url:    z.string().url().optional(),
 }).refine(
   d => new Date(d.end_time) > new Date(d.start_time),
   { message: 'end_time must be after start_time', path: ['end_time'] },
@@ -80,6 +83,10 @@ export interface WorkshopRow {
   pdf_url:              string | null
   summary_md:           string | null
   summary_generated_at: string | null
+  summary_status:       'idle' | 'processing' | 'completed' | 'failed' | null
+  summary_attempts:     number | null
+  summary_error_code:   string | null
+  summary_error_message: string | null
   is_published:         boolean
   cancelled_at:         string | null
   created_at:           string
@@ -149,9 +156,33 @@ export async function createWorkshop(dto: CreateWorkshopDto): Promise<WorkshopRo
 }
 
 export async function updateWorkshop(id: string, dto: UpdateWorkshopDto): Promise<WorkshopRow> {
+  const { data: before, error: beforeError } = await supabase
+    .from('workshops')
+    .select('*')
+    .eq('id', id)
+    .is('cancelled_at', null)
+    .single<WorkshopRow>()
+
+  if (beforeError || !before) {
+    throw Object.assign(new Error('Workshop not found or cancelled'), { code: 'RESOURCE_NOT_FOUND' })
+  }
+
+  const updatePayload: Record<string, unknown> = { ...dto }
+
+  if (dto.capacity !== undefined && dto.capacity !== before.capacity) {
+    const registeredCount = before.capacity - before.seats_remaining
+    if (dto.capacity < registeredCount) {
+      throw Object.assign(
+        new Error(`Capacity ${dto.capacity} is below ${registeredCount} active registrations`),
+        { code: 'SEATS_BELOW_REGISTERED' },
+      )
+    }
+    updatePayload.seats_remaining = dto.capacity - registeredCount
+  }
+
   const { data, error } = await supabase
     .from('workshops')
-    .update(dto)
+    .update(updatePayload)
     .eq('id', id)
     .is('cancelled_at', null)
     .select()
@@ -162,6 +193,26 @@ export async function updateWorkshop(id: string, dto: UpdateWorkshopDto): Promis
   }
 
   invalidateCache()
+
+  const roomChanged = data.room !== before.room
+  const startChanged = data.start_time !== before.start_time
+  const endChanged = data.end_time !== before.end_time
+
+  if (roomChanged || startChanged || endChanged) {
+    const parts: string[] = []
+    if (roomChanged) parts.push(`phòng mới: ${data.room}`)
+    if (startChanged || endChanged) {
+      const start = new Date(data.start_time).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
+      const end = new Date(data.end_time).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
+      parts.push(`thời gian mới: ${start} – ${end}`)
+    }
+    eventBus.emit(WORKSHOP_CHANGED_EVENT, {
+      workshopId: data.id,
+      notificationTitle: `Cập nhật workshop "${data.title}"`,
+      notificationBody: `Workshop "${data.title}" có thay đổi — ${parts.join('; ')}.`,
+    } satisfies WorkshopChangedEvent)
+  }
+
   return data
 }
 
@@ -199,5 +250,14 @@ export async function cancelWorkshop(id: string, reason?: string): Promise<Works
   }
 
   invalidateCache()
+
+  eventBus.emit(WORKSHOP_CHANGED_EVENT, {
+    workshopId: data.id,
+    notificationTitle: `Workshop "${data.title}" đã bị huỷ`,
+    notificationBody: reason
+      ? `Workshop "${data.title}" đã bị huỷ. Lý do: ${reason}.`
+      : `Workshop "${data.title}" đã bị huỷ. Vui lòng kiểm tra app để biết chi tiết.`,
+  } satisfies WorkshopChangedEvent)
+
   return data
 }

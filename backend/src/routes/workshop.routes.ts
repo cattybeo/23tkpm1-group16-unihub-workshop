@@ -1,5 +1,6 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { loadProfile, requireRole, verifyJwt } from '../middleware/auth.js'
+import { AiSummaryService, SummaryServiceError } from '../services/ai-summary.service.js'
 import {
   cancelWorkshop,
   createWorkshop,
@@ -13,6 +14,7 @@ import {
 import { sendError, sendSuccess } from '../shared/http.js'
 
 const router = Router()
+const aiSummaryService = new AiSummaryService()
 
 // ---------------------------------------------------------------------------
 // GET / — public list (cache 5s). Organizer vẫn chỉ thấy published list.
@@ -107,6 +109,41 @@ router.post(
 )
 
 // ---------------------------------------------------------------------------
+// POST /:id/summary — upload PDF và chạy AI Summary async (organizer only)
+// ---------------------------------------------------------------------------
+router.post(
+  '/:id/summary',
+  verifyJwt,
+  loadProfile,
+  requireRole(['organizer']),
+  express.raw({ type: 'application/pdf', limit: '5mb' }),
+  async (req, res) => {
+    if (!req.is('application/pdf')) {
+      sendError(res, 400, 'PDF_INVALID_TYPE', 'Content-Type must be application/pdf')
+      return
+    }
+
+    if (!Buffer.isBuffer(req.body)) {
+      sendError(res, 400, 'PDF_INVALID_TYPE', 'Vui lòng gửi dữ liệu file PDF dạng binary.')
+      return
+    }
+
+    try {
+      const result = await aiSummaryService.beginSummary(req.params.id, req.body)
+      sendSuccess(res, result, 202)
+    } catch (err) {
+      if (err instanceof SummaryServiceError) {
+        sendError(res, err.status, err.code, err.message, err.details)
+        return
+      }
+
+      const e = err as Error
+      sendError(res, 500, 'VALIDATION_FAILED', e.message)
+    }
+  },
+)
+
+// ---------------------------------------------------------------------------
 // PATCH /:id/publish — publish draft (organizer only)
 // Route đặt trước PATCH /:id để không bị capture sai
 // ---------------------------------------------------------------------------
@@ -151,6 +188,10 @@ router.patch(
       sendSuccess(res, workshop)
     } catch (err) {
       const e = err as Error & { code?: string }
+      if (e.code === 'SEATS_BELOW_REGISTERED') {
+        sendError(res, 409, 'SEATS_BELOW_REGISTERED', e.message)
+        return
+      }
       sendError(res, 404, 'RESOURCE_NOT_FOUND', e.message)
     }
   },
