@@ -21,7 +21,7 @@ vi.mock('qrcode', () => ({
   default: qrCodeMock,
 }))
 
-import { registerForWorkshop } from './registration.service.js'
+import { RegistrationService } from './registration.service.js'
 
 describe('registerForWorkshop notification outbox integration', () => {
   beforeEach(() => {
@@ -50,7 +50,8 @@ describe('registerForWorkshop notification outbox integration', () => {
       }),
     })
 
-    const result = await registerForWorkshop(
+    const service = new RegistrationService()
+    const result = await service.registerForWorkshop(
       '22120001',
       '11111111-1111-1111-1111-111111111111',
       'user-1',
