@@ -59,6 +59,8 @@ skills-lock.json
 dist/
 build/
 out/
+dev-dist/
+output/
 
 # OS temp files
 *.tmp
