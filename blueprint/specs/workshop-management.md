@@ -2,7 +2,7 @@
 
 ## Mô tả
 
-Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Organizer chỉ có thể sửa hoặc huỷ workshop do chính mình tạo. Khi workshop bị huỷ hoặc đổi phòng, đổi giờ, hệ thống tự gửi thông báo đến sinh viên đã đăng ký.
+Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Mọi organizer ngang quyền trên mọi workshop (single committee). Khi workshop bị huỷ hoặc đổi phòng, đổi giờ, hệ thống tự gửi thông báo đến sinh viên đã đăng ký.
 
 ## Luồng chính
 
@@ -15,7 +15,7 @@ Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Organiz
 **Sửa workshop:**
 
 1. Organizer gửi `PATCH /api/v1/workshops/:id`.
-2. Hệ thống xác minh người gửi là chủ sở hữu (`created_by = người dùng hiện tại`). Nếu không phải, trả 403.
+2. Hệ thống xác minh người gửi có role `organizer`. Không kiểm tra ownership.
 3. Cập nhật thông tin. Nếu thay đổi phòng hoặc giờ, phát sự kiện để gửi thông báo đến sinh viên đã đăng ký.
 
 **Huỷ workshop:**
@@ -29,7 +29,6 @@ Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Organiz
 | Tình huống | Xử lý |
 |---|---|
 | Sinh viên hoặc nhân sự quét QR gọi API tạo/sửa workshop | Trả 403 `FORBIDDEN_ROLE` |
-| Organizer A sửa workshop của organizer B | Trả 403 `FORBIDDEN_OWNERSHIP` |
 | Workshop không tồn tại | Trả 404 |
 | Giờ bắt đầu sau giờ kết thúc, số chỗ bằng 0 | Trả 400 kèm thông tin trường nào sai |
 | Giảm số chỗ xuống dưới số đã đăng ký | Trả 409 `SEATS_BELOW_REGISTERED` |
@@ -37,7 +36,6 @@ Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Organiz
 
 ## Ràng buộc
 
-- Mọi yêu cầu sửa và huỷ đều phải qua kiểm tra chủ sở hữu.
 - Huỷ workshop chỉ đặt `cancelled_at`, không xoá dữ liệu để giữ lịch sử.
 - Lý do huỷ là bắt buộc để đưa vào nội dung thông báo gửi sinh viên.
 - Workshop mới tạo mặc định ở trạng thái nháp, phải công bố thủ công.
@@ -45,7 +43,7 @@ Ban tổ chức tạo, chỉnh sửa và huỷ workshop qua trang admin. Organiz
 
 ## Tiêu chí chấp nhận
 
-- Organizer A tạo workshop X. Organizer B gọi `PATCH /workshops/X` nhận 403. Dữ liệu trong cơ sở dữ liệu không thay đổi.
+- Organizer A gọi `PATCH /workshops/X` (bất kỳ workshop nào) → **200** OK. Dữ liệu cập nhật đúng.
 - Sinh viên gọi `POST /workshops` nhận 403. Không có bản ghi mới được tạo.
 - Organizer tạo workshop, 3 sinh viên đăng ký. Gọi `DELETE` huỷ. Sau đó bảng `notifications` có 3 bản ghi email mới ở trạng thái chờ gửi.
 - Sau khi huỷ, khách gọi `GET /workshops/:id` nhận 404. Danh sách công khai không còn workshop này sau tối đa 5 giây.

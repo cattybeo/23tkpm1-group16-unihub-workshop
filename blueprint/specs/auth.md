@@ -10,7 +10,7 @@
 Kiểm soát **ai đang gọi** (authentication) và **họ được làm gì** (authorization) trên toàn bộ hệ thống.
 
 - **Authentication:** Supabase Auth làm IdP, JWT Bearer token làm credential. Express API không tự quản lý password.
-- **Authorization:** Mô hình **RBAC + ownership check** — 3 role cố định (`student`, `organizer`, `staff`), thực thi tại Express middleware. Organizer chỉ sửa/huỷ workshop do chính mình tạo (`workshops.created_by = req.user.id`).
+- **Authorization:** Mô hình **RBAC thuần** — 3 role cố định (`student`, `organizer`, `staff`), thực thi tại Express middleware. **Single committee**: mọi `organizer` ngang quyền trên mọi workshop, không có ownership check.
 
 ---
 
@@ -29,7 +29,7 @@ Browser / PWA ──── signIn(email, password) ────► Supabase Auth
 
 ### Request có phân quyền — middleware chain
 
-Mọi request đến `/api/v1/*` đi qua 4 middleware theo thứ tự:
+Mọi request đến `/api/v1/*` đi qua 3 middleware theo thứ tự:
 
 ```
 Request
@@ -44,11 +44,6 @@ loadProfile        → SELECT profiles WHERE id = req.user.id, set req.user.role
 requireRole(roles) → so sánh req.user.role với whitelist
   │                  403 FORBIDDEN_ROLE nếu không đủ quyền
   ▼
-requireOwnership   → fetch resource, so sánh created_by với req.user.id
-  │                  (chỉ áp cho route có ownership: PATCH/DELETE /workshops/:id)
-  │                  404 nếu resource không tồn tại
-  │                  403 FORBIDDEN_OWNERSHIP nếu không phải owner
-  ▼
 Controller
 ```
 
@@ -59,27 +54,26 @@ router.patch('/workshops/:id',
   verifyJwt,
   loadProfile,
   requireRole(['organizer']),
-  requireOwnership(workshopRepo.findById, 'created_by'),
   workshopController.update
 );
 ```
 
 ### Ma trận quyền hạn
 
-| Hành động | Endpoint | student | organizer (owner) | organizer (non-owner) | staff | anon |
-|---|---|:---:|:---:|:---:|:---:|:---:|
-| Xem danh sách workshop public | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Xem chi tiết workshop đã publish | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Xem workshop chưa publish | `GET /api/v1/workshops/:id` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Tạo workshop | `POST /api/v1/workshops` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Sửa / Huỷ workshop | `PATCH DELETE /workshops/:id` | ✗ | ✓ | ✗ | ✗ | ✗ |
-| Đăng ký workshop | `POST /api/v1/registrations` | ✓ | ✗ | ✗ | ✗ | ✗ |
-| Xem đăng ký của mình | `GET /api/v1/registrations/me` | ✓ | — | — | — | ✗ |
-| Xem toàn bộ đăng ký / thống kê | `GET /api/v1/admin/*` | ✗ | ✓ | ✓ | ✗ | ✗ |
-| Quét QR check-in | `POST /api/v1/check-ins` | ✗ | ✓ | ✓ | ✓ | ✗ |
-| Upload PDF + gen AI summary | `POST /workshops/:id/summary` | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Hành động | Endpoint | student | organizer | staff | anon |
+|---|---|:---:|:---:|:---:|:---:|
+| Xem danh sách workshop public | `GET /api/v1/workshops` | ✓ | ✓ | ✓ | ✓ |
+| Xem chi tiết workshop đã publish | `GET /api/v1/workshops/:id` | ✓ | ✓ | ✓ | ✓ |
+| Xem workshop chưa publish | `GET /api/v1/workshops/:id` | ✗ | ✓ | ✗ | ✗ |
+| Tạo workshop | `POST /api/v1/workshops` | ✗ | ✓ | ✗ | ✗ |
+| Sửa / Huỷ workshop | `PATCH DELETE /workshops/:id` | ✗ | ✓ | ✗ | ✗ |
+| Đăng ký workshop | `POST /api/v1/registrations` | ✓ | ✗ | ✗ | ✗ |
+| Xem đăng ký của mình | `GET /api/v1/registrations/me` | ✓ | — | — | ✗ |
+| Xem toàn bộ đăng ký / thống kê | `GET /api/v1/admin/*` | ✗ | ✓ | ✗ | ✗ |
+| Quét QR check-in | `POST /api/v1/check-ins` | ✗ | ✓ | ✓ | ✗ |
+| Upload PDF + gen AI summary | `POST /workshops/:id/summary` | ✗ | ✓ | ✗ | ✗ |
 
-> ✓ cho phép · ✗ từ chối (403) · — không áp dụng · **owner** = `workshops.created_by = req.user.id`
+> ✓ cho phép · ✗ từ chối (403) · — không áp dụng
 
 ---
 
@@ -92,7 +86,6 @@ router.patch('/workshops/:id',
 | JWT hết hạn | 401 | `TOKEN_EXPIRED` — FE redirect `/login` |
 | JWT hợp lệ nhưng profile không có trong DB | 401 | `PROFILE_NOT_FOUND` |
 | Role không đủ quyền | 403 | `FORBIDDEN_ROLE` + `required: ['organizer']` |
-| Organizer A sửa workshop của organizer B | 403 | `FORBIDDEN_OWNERSHIP` |
 | Resource không tồn tại | 404 | `RESOURCE_NOT_FOUND` |
 | Anon/student truy cập workshop chưa publish | **404** | `RESOURCE_NOT_FOUND` — trả 404 thay vì 403 để không leak sự tồn tại của resource |
 
@@ -113,10 +106,9 @@ router.patch('/workshops/:id',
 1. Anon gọi endpoint cần auth → **401** `UNAUTHENTICATED` (không phải 403).
 2. Student gọi `POST /api/v1/workshops` → **403** `FORBIDDEN_ROLE`.
 3. Staff gọi `POST /api/v1/workshops` → **403** `FORBIDDEN_ROLE`.
-4. Organizer A tạo workshop X → organizer B gọi `PATCH /workshops/X` → **403** `FORBIDDEN_OWNERSHIP`.
-5. Organizer A gọi `PATCH /workshops/X` của chính mình → **200** OK.
-6. `GET /registrations/me` với student → trả CHỈ registration của student đó, không leak của người khác.
-7. JWT hết hạn → **401** `TOKEN_EXPIRED`.
-8. Anon gọi `GET /workshops/:id` cho workshop chưa publish → **404** (không phải 403).
-9. FE gọi Supabase JS trực tiếp đọc bảng `payments` → 0 rows (RLS deny-all).
-10. Admin đổi role user từ `student` → `organizer` → request **tiếp theo** của user đó đã có quyền organizer mà không cần đăng xuất lại.
+4. Organizer A gọi `PATCH /workshops/X` (bất kỳ workshop nào) → **200** OK.
+5. `GET /registrations/me` với student → trả CHỈ registration của student đó, không leak của người khác.
+6. JWT hết hạn → **401** `TOKEN_EXPIRED`.
+7. Anon gọi `GET /workshops/:id` cho workshop chưa publish → **404** (không phải 403).
+8. FE gọi Supabase JS trực tiếp đọc bảng `payments` → 0 rows (RLS deny-all).
+9. Admin đổi role user từ `student` → `organizer` → request **tiếp theo** của user đó đã có quyền organizer mà không cần đăng xuất lại.

@@ -61,7 +61,7 @@ sequenceDiagram
     participant DB as Postgres DB
 
     Org->>API: POST /workshops/:id/summary (File PDF)
-    API->>API: Kiểm tra quyền (requireOwnership)
+    API->>API: Kiểm tra quyền (requireRole organizer)
     API->>API: Lưu file vào Storage (Supabase)
     API-->>Org: 202 Accepted (Thông báo "Đang tóm tắt...")
 
@@ -119,7 +119,7 @@ sequenceDiagram
 1. **Giới hạn đầu vào:** Chỉ chấp nhận định dạng `.pdf`. Dung lượng tối đa **5MB** để tránh làm nghẽn băng thông và RAM của server khi parse text.
 2. **Bảo mật API:** `OPENAI_API_KEY` chỉ được truy cập ở server-side. Tuyệt đối không expose thông tin model AI ra client để tránh bị dùng chùa (Prompt Injection/API abuse).
 3. **Chi phí (Token limit):** Hệ thống giới hạn mỗi workshop chỉ được tóm tắt tối đa 3 lần (để tránh Organizer bấm liên tục gây lãng phí chi phí API).
-4. **Quyền hạn:** Việc tạo bản tóm tắt là quyền đặc hữu của Organizer chủ quản workshop đó. Các Organizer khác và Sinh viên chỉ có quyền xem bản tóm tắt có sẵn.
+4. **Quyền hạn:** Việc tạo bản tóm tắt chỉ dành cho role `organizer`. Sinh viên và staff chỉ có quyền xem bản tóm tắt có sẵn. Mọi organizer đều có thể upload summary cho bất kỳ workshop nào (single committee).
 
 ---
 
@@ -129,4 +129,4 @@ sequenceDiagram
 2. **Độ chính xác:** Nội dung tóm tắt phải chứa ít nhất 3 thông tin quan trọng: Mục tiêu workshop, Diễn giả, và Nội dung chính.
 3. **Tính nhất quán:** F5 trang chi tiết workshop, bản tóm tắt phải hiển thị ngay lập tức (đã cache trong DB), không thấy hiện tượng "đang tải" từ AI nữa.
 4. **Xử lý file lỗi:** Upload 1 file ảnh đổi đuôi thành `.pdf` -> Hệ thống phải báo lỗi hợp lệ, không được treo server (crash process).
-5. **Phân quyền:** Dùng tài khoản của Organizer B để upload summary cho workshop của Organizer A -> Hệ thống trả về `403 Forbidden`.
+5. **Phân quyền:** Dùng tài khoản student để upload summary -> Hệ thống trả về `403 FORBIDDEN_ROLE`. Organizer B upload summary cho workshop của Organizer A -> **200** OK (single committee, không có ownership check).
