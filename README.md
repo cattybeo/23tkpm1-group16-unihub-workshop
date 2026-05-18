@@ -1,703 +1,204 @@
-# UniHub Workshop
+# UNIHUB WORKSHOP
 
-> Hệ thống đăng ký workshop nội bộ cho trường đại học — thay thế Google Form bằng nền tảng có kiểm soát chỗ ngồi realtime, thanh toán có phí, check-in offline-first, AI Summary từ PDF, và import dữ liệu sinh viên từ CSV nightly.
+![React](https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4-000000?style=for-the-badge&logo=express&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)
+![OpenRouter](https://img.shields.io/badge/OpenRouter-AI-111111?style=for-the-badge)
+![Vitest](https://img.shields.io/badge/Vitest-3-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)
 
-**Nhóm 16 — 23TKPM1**
+![Screenshot](img/anhbia.png)
+
+UniHub Workshop là hệ thống đăng ký workshop nội bộ cho trường đại học. Dự án thay Google Form bằng một ứng dụng có đăng ký chỗ ngồi, thanh toán mock, vé QR, check-in offline-first, dashboard thống kê, import sinh viên từ CSV và AI Summary từ PDF.
+
+**Nhóm 16, lớp 23TKPM1**
 
 | MSSV | Họ và tên | Email |
 |------|-----------|-------|
-| 23127417 | Đào Hoàng Đức Mạnh | dhdmanh23@clc.fitus.edu.vn |
-| 22127403 | Nguyễn Trần Minh Thư | ntmthu22@clc.fitus.edu.vn |
-| 23127362 | Phạm Anh Hào | pahao23@clc.fitus.edu.vn |
-
----
-
-## Mục lục
-
-- [Bối cảnh & Vấn đề](#bối-cảnh--vấn-đề)
-- [Tính năng chính](#tính-năng-chính)
-- [Kiến trúc hệ thống](#kiến-trúc-hệ-thống)
-- [Tech Stack](#tech-stack)
-- [Cấu trúc dự án](#cấu-trúc-dự-án)
-- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-- [Hướng dẫn cài đặt](#hướng-dẫn-cài-đặt)
-- [Biến môi trường](#biến-môi-trường)
-- [Database Schema](#database-schema)
-- [Dữ liệu mẫu & Tài khoản test](#dữ-liệu-mẫu--tài-khoản-test)
-- [Trạng thái implementation hiện tại](#trạng-thái-implementation-hiện-tại)
-- [Phân quyền (RBAC)](#phân-quyền-rbac)
-- [API Overview](#api-overview)
-- [Các cơ chế kỹ thuật nổi bật](#các-cơ-chế-kỹ-thuật-nổi-bật)
-- [Testing](#testing)
-- [Quy định commit](#quy-định-commit)
-- [Tài liệu tham khảo](#tài-liệu-tham-khảo)
-
----
-
-## Bối cảnh & Vấn đề
-
-Trường tổ chức "Tuần lễ kỹ năng và nghề nghiệp" — 5 ngày, 8–12 workshop song song mỗi ngày. Hệ thống hiện tại dùng Google Form dẫn đến:
-
-| Vấn đề | Hậu quả |
-|--------|---------|
-| Overbooking | Không giới hạn chỗ realtime, sinh viên đăng ký vào workshop đã đầy |
-| Check-in thủ công | Điểm danh tay, dễ sai sót |
-| Thiếu kiểm soát thu phí | Không có luồng thanh toán |
-| Không chịu tải | Mất/trễ thông báo khi đột biến ~12.000 sinh viên |
-| Thiếu analytics | Không đo được tỷ lệ tham dự hay workshop nào hot |
-
-**Mục tiêu thiết kế:**
-
-| Mục tiêu | Tiêu chí |
-|-----------|----------|
-| Seat consistency | 0 double-booking kể cả 12.000 sinh viên đăng ký đồng thời |
-| Payment idempotency | Một giao dịch chỉ thực hiện đúng 1 lần dù client retry nhiều lần |
-| Offline check-in | 0% data loss khi mất mạng, sync khi kết nối phục hồi |
-| CSV import an toàn | File lỗi / dữ liệu trùng không làm crash service đang chạy |
-| Thông báo extensible | Thêm kênh mới (Telegram…) mà không sửa logic đăng ký |
-
-> **Phạm vi:** MVP chạy localhost, không deploy production. Cổng thanh toán và email đều là mock. 12.000 user là mục tiêu thiết kế, không phải benchmark thực tế.
-
----
+| 23127417 | Đào Hoàng Đức Mạnh | <dhdmanh23@clc.fitus.edu.vn> |
+| 22127403 | Nguyễn Trần Minh Thư | <ntmthu22@clc.fitus.edu.vn> |
+| 23127362 | Phạm Anh Hào | <pahao23@clc.fitus.edu.vn> |
 
 ## Tính năng chính
 
-### Sinh viên
-- Duyệt danh sách workshop: tìm kiếm, filter, sort theo thời gian và phòng
-- Xem số chỗ còn lại **realtime** (Supabase Realtime WebSocket)
-- Đăng ký workshop miễn phí / có phí — nhận mã QR xác nhận
-- Xem và quản lý vé của mình
+- Sinh viên xem workshop, đăng ký workshop miễn phí hoặc có phí, nhận vé QR và xem vé đã đăng ký.
+- Ban tổ chức tạo, sửa, publish, hủy workshop, upload ảnh, upload PDF để tạo AI Summary và xem dashboard thống kê.
+- Nhân sự check-in quét QR bằng PWA, lưu tạm khi mất mạng và đồng bộ lại khi có mạng.
+- Hệ thống import danh sách sinh viên từ file CSV nightly trong `legacy-data/`.
+- Payment và email đang là mock để phục vụ demo localhost.
 
-### Ban tổ chức (Organizer)
-- Tạo, chỉnh sửa, hủy workshop (hủy = soft-delete `cancelled_at`, tự gửi thông báo đến sinh viên đã đăng ký)
-- Upload file ảnh bìa (`cover_image_url`) và sơ đồ phòng (`room_map_url`) lên Supabase Storage
-- Upload PDF → hệ thống tự tóm tắt nội dung bằng AI (OpenAI), kết quả lưu vào `summary_md`
-- Xem dashboard thống kê: tổng đăng ký, tỷ lệ lấp đầy phòng, tỷ lệ tham dự, biểu đồ đăng ký theo giờ (Recharts)
-- Xem log CSV import nightly
+## Tech stack
 
-### Nhân sự check-in (Scanner)
-- Quét mã QR tại cửa phòng bằng PWA (cài ra màn hình chính, UX như app native)
-- **Offline-first:** ghi nhận check-in khi mất mạng (lưu IndexedDB), tự đồng bộ khi có mạng trở lại
-- Nút "Đồng bộ ngay" để chủ động flush dữ liệu offline
+- Frontend: React 19, Vite 6, TypeScript, Tailwind CSS, React Router, TanStack Query, Supabase JS, PWA.
+- Backend: Express 4, TypeScript, Supabase JS, Zod, pdf-parse, PapaParse, opossum, node-cron.
+- Database: Supabase Postgres, Auth, Realtime, Storage.
+- AI Summary: backend gọi OpenRouter từ Express. Dự án không dùng OpenAI API cho luồng summary hiện tại.
+- Test: Vitest.
 
----
+## Cấu trúc thư mục
 
-## Kiến trúc hệ thống
-
-Hệ thống theo kiểu **Modular Monolith** — một đơn vị triển khai, chia thành 8 bounded context. Backend Express áp dụng **Layered 4 tầng**: `routes → services → repositories → Supabase`.
-
-```
-                       VERTICAL (bounded contexts)
-       ┌──────────┬──────────┬─────────┬─────────┬──────────┬─────────┐
-       │ Catalog  │ Registr. │ Payment │ Checkin │ Notify   │ AI/CSV/ │
-       │          │          │         │         │          │ Identity│
-H ─────┼──────────┼──────────┼─────────┼─────────┼──────────┼─────────┤
-O   R  │ /api/v1/ │ /api/v1/ │ /api/v1/│/api/v1/ │ /api/v1/ │ /api/v1/│
-R   O  │workshops │  regist. │payments │checkins │notify    │csv,ai   │
-I   U  ├──────────┼──────────┼─────────┼─────────┼──────────┼─────────┤
-Z   T  │ Service  │ Service  │ Service │ Service │ Service  │ Service │
-O   E  │ (query   │ (seat    │ (CB +   │ (sync   │(EventEm. │ (batch+ │
-N   S  │  + cache)│  reserv.)│ idem.)  │  logic) │ + outbox)│ pipeline)│
-T      ├──────────┼──────────┼─────────┼─────────┼──────────┼─────────┤
-A   D  │ Repo     │ Repo     │ Repo    │ Repo    │ Repo     │ Repo    │
-L   B  │workshops │regist.   │idem_keys│check_ins│notif.    │students │
-       └──────────┴──────────┴─────────┴─────────┴──────────┴─────────┘
-
-Cross-cutting middleware:
-  verifyJwt → loadProfile → requireRole([...])
-  Rate Limit (Token Bucket) · Idempotency · Logger · Error handler
+```text
+frontend/             React PWA
+backend/              Express API
+supabase/db_schema.sql
+legacy-data/          CSV sinh viên mẫu
+blueprint/            tài liệu thiết kế và spec chi tiết
+docs/                 ghi chú tech stack
+img/                  sơ đồ minh họa
+full-guide.md         quy ước kỹ thuật chính của repo
 ```
 
-**Phong cách kiến trúc theo module:**
+Chi tiết kiến trúc, RBAC, API, database schema và ADR nằm trong `blueprint/design.md` và `full-guide.md`. README này chỉ giữ phần hướng dẫn chạy và test nhanh.
 
-| Module | Phong cách |
-|--------|-----------|
-| Catalog, Registration, Payment, Checkin, Identity | Layered |
-| Notification | Event-based (EventEmitter + Outbox pattern) |
-| CSV Import | Batch Sequential (ETL pipeline) |
-| AI Summary | Pipe-and-Filter |
+## Yêu cầu
 
-**Giao tiếp giữa module:** gọi service interface đồng bộ hoặc `EventEmitter` fire-and-forget. Module A không được import repository của module B.
+- Node.js 20 trở lên
+- npm 10 trở lên
+- File `.env` ở thư mục gốc project
+- Nếu tự tạo database mới: một Supabase project trống để chạy `supabase/db_schema.sql`
 
-Ports & Adapters: services phụ thuộc TS interface (`INotifier`, `IPaymentGateway`, `IWorkshopRepository`), không import Supabase/OpenAI trực tiếp.
+## Cài đặt
 
-Xem sơ đồ C4 Level 1, Level 2 và High-Level Architecture tại [`blueprint/design.md`](blueprint/design.md) và thư mục [`img/`](img/).
-
----
-
-## Tech Stack
-
-### Frontend
-
-| Thư viện | Version | Vai trò |
-|----------|---------|---------|
-| React | ^19.0.0 | UI framework |
-| TypeScript | ^5.7.0 | Ngôn ngữ, strict mode |
-| Vite + `@vitejs/plugin-react-swc` | ^6.2.0 / ^3.7.0 | Build tool, HMR nhanh |
-| Tailwind CSS | ^3.4.0 | Utility-first CSS |
-| React Router | ^6.28.0 | Client-side routing |
-| TanStack Query | ^5.62.0 | Server state, cache, retry |
-| Supabase JS | ^2.47.0 | Auth (JWT + auto-refresh) + Realtime WebSocket |
-| Zod | ^3.24.0 | Schema validation (dùng chung với BE) |
-| lucide-react | ^1.16.0 | Icon set |
-| html5-qrcode | ^2.3.8 | QR scanner qua camera (iOS Safari WebRTC) |
-| vite-plugin-pwa | ^0.21.0 | Service Worker + Web App Manifest |
-| workbox-window | ^7.0.0 | SW lifecycle & foreground sync |
-| Vitest | ^3.0.0 | Test runner |
-
-### Backend
-
-| Thư viện | Version | Vai trò |
-|----------|---------|---------|
-| Express | ^4.21.0 | HTTP framework |
-| TypeScript | ^5.7.0 | Ngôn ngữ, strict mode |
-| tsx | ^4.19.0 | TS runner dev (không cần compile bước) |
-| Supabase JS | ^2.47.0 | Auth verify JWT + DB client (bypass RLS) |
-| Zod | ^3.24.0 | Schema validation tại entry routes |
-| cors | ^2.8.5 | CORS cho FE :5173 ↔ BE :3000 |
-| helmet | ^8.0.0 | HTTP security headers |
-| express-rate-limit | ^7.5.0 | Rate limiting (Token Bucket, in-memory) |
-| opossum | ^8.1.0 | Circuit breaker cho payment gateway |
-| openai | ^4.70.0 | AI Summary (gọi từ Express, không qua Edge Functions) |
-| pdf-parse | ^1.1.1 | Trích văn bản từ PDF (pure JS, không cần native binary) |
-| papaparse | ^5.4.1 | Parse CSV nightly (stream, không load toàn bộ vào RAM) |
-| qrcode | ^1.5.4 | Sinh mã QR khi đăng ký thành công |
-| Vitest | ^3.0.0 | Test runner |
-
-### Hạ tầng & Dịch vụ
-
-| Dịch vụ | Vai trò |
-|---------|---------|
-| Supabase (PostgreSQL) | Database chính, ACID transactions |
-| Supabase Auth | JWT authentication, auto-refresh token |
-| Supabase RLS | Row-level security (safety net cho 2 bảng FE truy cập trực tiếp) |
-| Supabase Realtime | Push `seats_remaining` và in-app notification realtime |
-| Supabase Storage | Lưu ảnh bìa, sơ đồ phòng (bucket `workshop-assets`) |
-| OpenAI API | Tóm tắt nội dung workshop từ PDF |
-| Node EventEmitter | Notification dispatch in-process (không dùng Kafka/BullMQ) |
-
-> **Không dùng Redis:** single instance, in-memory + Postgres đủ cho MVP (ADR-011).  
-> Chi tiết lý do chọn từng dependency: [`docs/techstack.md`](docs/techstack.md)
-
----
-
-## Cấu trúc dự án
-
-```
-unihub-workshop/
-├── .env                         # ⚠️ Không commit — tải tại link MediaFire ở mục Cài đặt
-├── .env.example                 # Template mô tả từng biến
-├── blueprint/                   # Tài liệu thiết kế (Phần 1 — Blueprint)
-│   ├── proposal.md              # Bối cảnh, vấn đề, mục tiêu, phạm vi, rủi ro
-│   ├── design.md                # Kiến trúc, C4 Diagram, DB Schema, 13 ADR
-│   └── specs/                   # Đặc tả chi tiết từng module
-│       ├── auth.md              # RBAC & JWT
-│       ├── registration.md      # Luồng đăng ký & Concurrency
-│       ├── payment.md           # Idempotency & Circuit Breaker
-│       ├── checkin.md           # Offline sync logic (PWA + IndexedDB)
-│       ├── ai-summary.md        # Pipe-and-Filter AI pipeline
-│       ├── csv-import.md        # Batch ETL nightly
-│       ├── notification.md      # Event-based + Outbox pattern
-│       ├── analytics-dashboard.md
-│       ├── access-control.md
-│       ├── seat-reservation.md
-│       └── workshop-management.md
-├── backend/                     # Express + TypeScript
-│   ├── src/
-│   │   ├── modules/             # Bounded contexts: catalog, registration, payment, checkin, notify, ai-summary
-│   │   ├── routes/              # Entry HTTP handlers (Zod validation, route mounting)
-│   │   ├── services/            # Business logic
-│   │   ├── middleware/          # verifyJwt, loadProfile, requireRole, idempotency, error-handler
-│   │   ├── infra/               # Adapters: supabase client, event-bus, payment gateway
-│   │   ├── shared/              # Zod schemas dùng chung FE/BE
-│   │   └── workers/             # Cron: CSV nightly (02:00), seat TTL release (mỗi 60s)
-│   ├── package.json
-│   └── tsconfig.json
-├── frontend/                    # React PWA
-│   ├── src/
-│   │   ├── components/          # Header, MobileNav, WorkshopCard, CapacityIndicator, UserMenu
-│   │   ├── pages/               # DiscoverPage, WorkshopDetailPage, MyTicketsPage, AdminPage, StaffPage, ...
-│   │   ├── lib/                 # api-client, auth-context, tickets-context, supabase client
-│   │   └── types/               # workshop.ts, staff.ts (TS interfaces)
-│   ├── package.json
-│   └── vite.config.ts           # PWA config, envDir → root, proxy /api → :3000
-├── supabase/
-│   └── db_schema.sql            # Full schema idempotent — single source of truth
-├── legacy-data/
-│   ├── README.md                # Format CSV nightly, logic import
-│   └── students_nightly_2026-05-17.csv   # File CSV mẫu
-├── docs/
-│   └── techstack.md             # Lý do chọn từng dependency
-├── img/                         # Diagram: C4 Level 1/2, DB schema, high-level (PNG + SVG)
-├── full-guide.md                # AI context guide — single source of truth khi mâu thuẫn
-├── requirement.md               # Yêu cầu đồ án gốc từ giảng viên
-└── README.md
-```
-
----
-
-## Yêu cầu hệ thống
-
-- **Node.js** ≥ 20
-- **npm** ≥ 10
-- Tài khoản [Supabase](https://supabase.com) (free tier là đủ)
-- **OpenAI API key** (chỉ cần cho tính năng AI Summary; các tính năng khác chạy bình thường nếu để trống)
-
----
-
-## Hướng dẫn cài đặt
-
-### 1. Clone repository
+Clone repo và cài dependencies:
 
 ```bash
 git clone <repo-url>
 cd 23tkpm1-group16-unihub-workshop
-```
 
-### 2. Cài dependencies
-
-```bash
 cd frontend && npm install && cd ..
 cd backend && npm install && cd ..
 ```
 
-### 3. Tạo project Supabase
+### Cấu hình nhanh bằng `.env` có sẵn
 
-1. Đăng nhập [supabase.com](https://supabase.com) → **New project**
-2. Đặt tên project, chọn region **Singapore**, đặt database password
-3. Chờ khởi tạo (~1 phút) → **Project Settings → API**
-4. Copy 3 giá trị: **Project URL**, **anon public key**, **service_role secret**
+Tải file `.env` demo tại: [https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file](https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file)
 
-### 4. Cấu hình biến môi trường
+Đặt file `.env` tại thư mục gốc, ngang hàng với `README.md`.
 
-Tải file `.env` đã cấu hình sẵn tại: **[https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file](https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file)**
-
-Đặt file tại **thư mục gốc** của project (ngang hàng với `README.md`):
-
-```
-unihub-workshop/
-├── .env          ← đặt tại đây
-├── frontend/
-├── backend/
-└── ...
+```text
+23tkpm1-group16-unihub-workshop/
+  .env
+  frontend/
+  backend/
+  supabase/
 ```
 
-Xem mô tả từng biến tại [`.env.example`](.env.example) hoặc mục [Biến môi trường](#biến-môi-trường) bên dưới.
+File `.env` này trỏ tới database demo đã có dữ liệu mẫu, gồm workshop, đăng ký, vé, tài khoản admin, staff và tài khoản sinh viên `23127417 / 123456`.
 
-### 5. Khởi tạo database
+### Tự setup Supabase riêng
 
-Vào **Supabase Dashboard → SQL Editor**, chạy lần lượt:
+Nếu muốn dùng database riêng, tạo Supabase project mới rồi vào SQL Editor chạy toàn bộ nội dung:
 
+```text
+supabase/db_schema.sql
 ```
-1. Paste nội dung supabase/db_schema.sql → Run   (idempotent, chạy lại không lỗi)
-2. Paste nội dung supabase/seed.sql      → Run
-```
 
-> **Lưu ý seed.sql:** Phần `INSERT INTO auth.users` chỉ chạy được trên **Supabase local** (`supabase start`). Trên **Supabase cloud**, tạo user qua Dashboard → Authentication → Users → Add user, sau đó chạy phần `profiles` trở xuống trong seed.sql.
+File này là bản clone schema của dự án, gồm extensions, enums, tables, constraints, triggers, indexes, RLS, grants, realtime publication, RPC functions, storage bucket `workshop-assets`, storage policies và 2 tài khoản test cơ bản.
 
-### 6. Chạy ứng dụng
+Sau đó tạo `.env` riêng với các key tương ứng của Supabase project mới và OpenRouter. Có thể dựa theo file `.env` demo để giữ đúng tên biến.
+
+`db_schema.sql` chỉ seed 2 tài khoản auth để thầy test quyền quản trị và check-in:
+
+| Màn hình | Tài khoản | Mật khẩu | Vai trò |
+|----------|-----------|----------|--------|
+| `/staff-login` | `admin@unihub` | `123` | Ban tổ chức |
+| `/staff-login` | `staff@unihub` | `123` | Nhân sự check-in |
+
+Tài khoản sinh viên mẫu `23127417 / 123456` chỉ có sẵn trong database demo đi kèm file `.env` tải ở trên. Nếu dùng Supabase riêng, cần import CSV hoặc tạo dữ liệu sinh viên tương ứng trước khi test luồng sinh viên.
+
+## Chạy ứng dụng
+
+Mở 2 terminal:
 
 ```bash
-# Terminal 1 — Backend (http://localhost:3000)
-cd backend && npm run dev
-
-# Terminal 2 — Frontend (http://localhost:5173)
-cd frontend && npm run dev
+# Terminal 1: backend
+cd backend
+npm run dev
 ```
-
----
-
-## Biến môi trường
-
-Tất cả biến môi trường nằm trong **một file `.env` duy nhất ở thư mục gốc**. Tải file đã cấu hình sẵn tại: [https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file](https://www.mediafire.com/file/uwbs84udzt3eu4g/.env/file)
-
-Xem toàn bộ biến và giải thích tại [`.env.example`](.env.example). Các biến quan trọng:
-
-```env
-# Supabase (backend dùng SUPABASE_*, frontend dùng VITE_SUPABASE_*)
-SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJ...    # ⚠️ Chỉ backend đọc — không bao giờ commit
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJ...       # Public, an toàn để Vite bundle vào FE
-
-# Mock payment fail rate: 0.0 = luôn thành công, 1.0 = luôn thất bại (test circuit breaker)
-PAYMENT_MOCK_FAIL_RATE=0
-
-PORT=3000
-NODE_ENV=development
-```
-
-> **Tại sao 1 file?** Backend đọc qua `--env-file=../.env` (chạy từ `backend/`). Frontend đọc qua Vite `envDir` trỏ về root. `VITE_*` vars được Vite inject vào browser bundle — chỉ đặt public keys vào đây.
-
----
-
-## Database Schema
-
-Schema đầy đủ tại [`supabase/db_schema.sql`](supabase/db_schema.sql) — idempotent, single source of truth. Gồm 8 bảng:
-
-| Bảng | Vai trò | Điểm đáng chú ý |
-|------|---------|-----------------|
-| `students` | Whitelist sinh viên từ CSV nightly | PK = `mssv` (không dùng UUID surrogate). `is_active` cho soft-delete. Constraint `mssv_format: ^[A-Za-z0-9]{6,20}$` |
-| `profiles` | Tài khoản, liên kết `auth.users` | Lưu `role`, `mssv` (FK → students, bắt buộc nếu role=student), `must_change_password` |
-| `workshops` | Workshop | `seats_remaining`, `is_published`, `cancelled_at` (soft-delete), `cover_image_url`, `room_map_url`, `pdf_url`, `summary_md`, `summary_generated_at` |
-| `registrations` | Đăng ký | FK `mssv` → students (không phải student_id). Status enum: `pending_payment / confirmed / cancelled / expired`. Constraint: **EXCLUDE USING BTREE (mssv, workshop_id) WHERE status IN ('pending_payment','confirmed')** — cho phép đăng ký lại sau khi cancel/expired |
-| `payments` | Lịch sử thanh toán | Tách khỏi registrations vì 1 registration có thể có nhiều payment attempt (CB open→close) |
-| `idempotency_keys` | Chống duplicate request | PK = `key` (text). TTL 24h xử lý ở application layer |
-| `check_ins` | Lịch sử check-in | `UNIQUE(registration_id)` chống trùng. Enum `source`: online/offline |
-| `notifications` | In-app notification | Chỉ lưu in-app. Email gửi qua mock adapter, **không lưu vào bảng này** |
-
-**Enums:** `user_role`, `registration_status`, `payment_status`, `check_in_source`
-
-**Storage bucket:** `workshop-assets` (public, 5MB limit, image/jpeg + png + webp). Path convention: `{workshop_id}/cover.{ext}`, `{workshop_id}/room-map.{ext}`.
-
-**RLS:**
-- `workshops`: SELECT khi `is_published = true AND cancelled_at IS NULL` (public read)
-- `profiles`: self-read/update
-- 6 bảng còn lại: RLS bật + 0 policy = deny-all (backend bypass bằng service_role key)
-- Storage `workshop-assets`: read public, insert/update/delete chỉ organizer đã đăng nhập
-
----
-
-## Dữ liệu mẫu & Tài khoản test
-
-`seed.sql` tạo sẵn dữ liệu đủ để demo tất cả tính năng:
-
-- **4 workshop:** 1 miễn phí còn chỗ, 1 miễn phí hết chỗ, 1 có phí (có AI summary), 1 đã hủy
-- **6 user:** 2 organizer, 1 scanner, 3 student (MSSV khớp với CSV mẫu)
-- **5 registrations:** đủ các status (confirmed, pending_payment, cancelled...)
-- **2 payments:** 1 succeeded, 1 failed
-- **1 check-in, 3 in-app notifications**
-
-**Tài khoản test (chạy trên Supabase local):**
-
-| Email | Password | Role |
-|-------|----------|------|
-| organizer1@unihub.edu | demo-password | organizer |
-| organizer2@unihub.edu | demo-password | organizer |
-| scanner1@unihub.edu | demo-password | scanner |
-| an.nguyen@student.unihub.edu | demo-password | student (MSSV: 21127001) |
-| ngoc.tran@student.unihub.edu | demo-password | student (MSSV: 21127002) |
-| manh.dao@student.unihub.edu | demo-password | student (MSSV: 23127050) |
-
-**Trên Supabase cloud:** Tạo user qua Dashboard, sau đó gán role thủ công:
-
-```sql
-UPDATE profiles SET role = 'organizer' WHERE id = '<user-uuid>';
-UPDATE profiles SET role = 'scanner'   WHERE id = '<user-uuid>';
--- Mặc định: role = 'student'
-```
-
-**Test circuit breaker:**
-```bash
-# Trong backend/.env
-PAYMENT_MOCK_FAIL_RATE=1.0   # 100% fail → CB mở sau ngưỡng 50%
-```
-
----
-
----
-
-## Phân quyền (RBAC)
-
-**Middleware chain:** `verifyJwt → loadProfile → requireRole([...])`
-
-`loadProfile` query DB mỗi request (không đọc từ JWT claim) → đổi role có hiệu lực ngay, không cần đợi token expire.
-
-| Hành động | Endpoint | student | organizer | scanner | anon |
-|-----------|----------|:-------:|:---------:|:-------:|:----:|
-| Xem danh sách workshop | `GET /workshops` | ✓ | ✓ | ✓ | ✓ |
-| Xem workshop đã publish | `GET /workshops/:id` | ✓ | ✓ | ✓ | ✓ |
-| Xem workshop chưa publish | `GET /workshops/:id` | 404 | ✓ | 404 | 404 |
-| Tạo / Sửa / Hủy workshop | `POST/PATCH/DELETE /workshops` | ✗ | ✓ | ✗ | ✗ |
-| Upload PDF + AI Summary | `POST /workshops/:id/summary` | ✗ | ✓ | ✗ | ✗ |
-| Đăng ký workshop | `POST /registrations` | ✓ (chỉ mình) | ✗ | ✗ | ✗ |
-| Xem vé của mình | `GET /registrations/me` | ✓ | — | — | ✗ |
-| Xem tất cả đăng ký | `GET /admin/registrations` | ✗ | ✓ | ✗ | ✗ |
-| Quét QR check-in | `POST /check-ins` | ✗ | ✓ | ✓ | ✗ |
-| Sync offline check-in | `POST /check-ins/sync` | ✗ | ✓ | ✓ | ✗ |
-| Xem thống kê | `GET /admin/stats` | ✗ | ✓ | ✗ | ✗ |
-| Trigger CSV import | `POST /admin/csv-import` | ✗ | ✓ | ✗ | ✗ |
-
-**HTTP status lỗi auth:**
-
-| Tình huống | HTTP | Error code |
-|------------|------|------------|
-| Thiếu Authorization header | 401 | `UNAUTHENTICATED` |
-| JWT sai định dạng / signature | 401 | `INVALID_TOKEN` |
-| JWT hết hạn | 401 | `TOKEN_EXPIRED` |
-| Profile không tồn tại trong DB | 401 | `PROFILE_NOT_FOUND` |
-| Role không đủ | 403 | `FORBIDDEN_ROLE` |
-| Workshop chưa publish (student/anon) | 404 | `RESOURCE_NOT_FOUND` (404 thay vì 403 — chống information disclosure) |
-
----
-
-## API Overview
-
-Prefix `/api/v1/`. Response envelope thống nhất:
-
-```json
-{ "data": {}, "error": { "code": "UPPER_SNAKE_CASE", "message": "..." }, "meta": {} }
-```
-
-**HTTP status conventions:**
-
-| Code | Khi nào |
-|------|---------|
-| 200/201/202/204 | Success / Created / Accepted (async job) / Deleted |
-| 400 | Validation fail, thiếu header |
-| 401 | Auth fail |
-| 403 | FORBIDDEN_ROLE |
-| 404 | Không tồn tại HOẶC không có quyền xem (chống info disclosure) |
-| 409 | REQUEST_IN_PROGRESS, ALREADY_REGISTERED, ALREADY_CHECKED_IN, SEATS_SOLD_OUT |
-| 429 | RATE_LIMIT_EXCEEDED + `Retry-After` header |
-| 503 | PAYMENT_UNAVAILABLE (CB open), STATS_UNAVAILABLE (query timeout > 5s) |
-
-**Endpoints chính:**
-
-```
-# Workshop
-GET    /api/v1/workshops                     # Public, no auth
-GET    /api/v1/workshops/:id
-POST   /api/v1/workshops                     # [organizer]
-PATCH  /api/v1/workshops/:id                 # [organizer]
-DELETE /api/v1/workshops/:id                 # [organizer]  soft-delete
-POST   /api/v1/workshops/:id/summary         # [organizer]  upload PDF → 202 async
-
-# Registration  — BẮT BUỘC header: Idempotency-Key: <uuid>
-POST   /api/v1/registrations                 # [student]
-GET    /api/v1/registrations/me              # [student]
-GET    /api/v1/admin/registrations           # [organizer]
-
-# Payment       — BẮT BUỘC header: Idempotency-Key: <uuid>
-POST   /api/v1/payments                      # [student]
-
-# Check-in
-POST   /api/v1/check-ins                     # [organizer, scanner]
-POST   /api/v1/check-ins/sync                # [organizer, scanner] batch offline sync
-
-# Admin
-GET    /api/v1/admin/stats                   # [organizer]  cache 60s
-GET    /api/v1/admin/stats/workshops/:id     # [organizer]  danh sách SV đã đăng ký
-POST   /api/v1/admin/csv-import              # [organizer]  trigger manual
-```
-
-**Error codes:** `UNAUTHENTICATED · INVALID_TOKEN · TOKEN_EXPIRED · PROFILE_NOT_FOUND · FORBIDDEN_ROLE · RESOURCE_NOT_FOUND · RATE_LIMIT_EXCEEDED · IDEMPOTENCY_KEY_REQUIRED · REQUEST_IN_PROGRESS · SEATS_SOLD_OUT · ALREADY_REGISTERED · STUDENT_NOT_VERIFIED · PAYMENT_DECLINED · PAYMENT_UNAVAILABLE · TICKET_NOT_FOUND · WRONG_WORKSHOP · ALREADY_CHECKED_IN · PDF_READ_FAILED · PDF_NO_TEXT · STATS_UNAVAILABLE`
-
----
-
-## Các cơ chế kỹ thuật nổi bật
-
-### 1. Seat Reservation — Chống double-booking
-
-Atomic `UPDATE` trừ chỗ và `INSERT` registration trong **cùng một transaction**. Gọi cổng thanh toán **ngoài** transaction (tránh giữ row lock trong khi chờ payment response):
-
-```sql
--- Trừ chỗ atomic: rowCount = 0 → SEATS_SOLD_OUT (409)
-UPDATE workshops
-SET seats_remaining = seats_remaining - 1
-WHERE id = $1 AND seats_remaining > 0
-RETURNING id;
-
--- Cùng transaction: EXCLUDE constraint ngăn đăng ký trùng cùng workshop
-INSERT INTO registrations (mssv, workshop_id, status, qr_token, expires_at)
-VALUES ($1, $2, 'pending_payment', gen_random_uuid(), now() + interval '15 minutes');
-```
-
-Vi phạm EXCLUDE constraint → rollback → `seats_remaining` tự khôi phục. Không dùng `SELECT FOR UPDATE` thủ công, không dùng optimistic locking (ADR-004).
-
-### 2. Payment Idempotency — Chống trừ tiền hai lần
-
-Header `Idempotency-Key: <uuid>` bắt buộc. **Atomic INSERT** — an toàn với concurrent retry (tránh race condition của SELECT-then-INSERT):
-
-```typescript
-const result = await db.query(`
-  INSERT INTO idempotency_keys (key, endpoint, user_id, response)
-  VALUES ($1, $2, $3, '{}'::jsonb)
-  ON CONFLICT (key) DO NOTHING
-  RETURNING key
-`, [key, endpoint, userId]);
-
-if (result.rows.length === 0) {
-  const existing = await db.query(
-    `SELECT response FROM idempotency_keys WHERE key = $1`, [key]
-  );
-  return res.json(existing.rows[0].response); // Trả cached response
-}
-// Ta nắm key → chạy business logic, UPDATE response khi xong
-```
-
-TTL 24h. Client FE sinh `crypto.randomUUID()` lúc user bấm lần đầu, lưu React state (không `localStorage`); retry cùng phiên dùng cùng key; reload trang → key mới.
-
-### 3. Circuit Breaker — Payment Gateway không ổn định
-
-`opossum` wrap `MockPaymentGateway.charge()`. Cấu hình: `timeout: 3000ms`, `errorThresholdPercentage: 50`, `resetTimeout: 30000ms`.
-
-```
-Closed ──(lỗi system > 50% hoặc timeout)──► Open ──(30s)──► Half-Open
-                                                               │
-                                                      thành công → Closed
-                                                      thất bại  → Open
-```
-
-Phân biệt lỗi: 4xx (business — thẻ sai, hết tiền) **không tính** vào tỷ lệ lỗi CB; 5xx/timeout (system) mới tính.
-
-Khi CB Open: đăng ký tạo `pending_payment`, giữ chỗ 15 phút, trả `503 PAYMENT_UNAVAILABLE`. Xem workshop, đăng ký miễn phí không bị ảnh hưởng (graceful degradation).
-
-Cron mỗi 60s: quét `pending_payment` quá 15 phút → `expired` + `seats_remaining + 1`.
-
-### 4. Offline Check-in — PWA Foreground Sync
-
-Không dùng Background Sync API — iOS Safari không hỗ trợ. Dùng **Foreground Sync** (100% tương thích):
-
-```
-[Offline] QR scan
-  → decode payload trên client (không cần server)
-  → lưu IndexedDB { id: uuid(), qr_token, workshop_id, scanned_at, status: 'pending' }
-  → Hiển thị màn hình vàng "Đã lưu tạm"
-
-[Có mạng] window.addEventListener('online') → auto flush
-          Nút "Đồng bộ ngay" → manual flush
-
-POST /check-ins/sync nhận array records
-  → Server: INSERT ... ON CONFLICT (registration_id) DO NOTHING
-  → Trả 200 + { synced: [...], errors: [...] }
-  → Client xóa IndexedDB records đã sync
-```
-
-`UNIQUE(registration_id)` + `ON CONFLICT DO NOTHING` → 0 trùng dù client gửi nhiều lần. Endpoint trả `200` dù có vé lỗi trong lô (Partial Success Pattern — không trả 4xx cho 1 vé rác trong batch 100 vé).
-
-Offline trade-off: không validate QR khi offline (không có DB) → chấp nhận quét nhầm vé lỗi, server từ chối ở bước sync → không gây ách tắc đám đông tại cửa phòng.
-
-### 5. AI Summary — Pipe-and-Filter
-
-```
-POST /workshops/:id/summary → 202 Accepted (async)
-
-Pipeline chạy ngầm:
-  [pdf-parse]   PDF buffer → raw text
-  [Cleaning]    regex loại số trang, header/footer, ký tự rác
-  [Chunking]    chia 2000 char/đoạn (tránh vượt context window)
-  [OpenAI]      tóm tắt từng chunk song song (Map)
-  [Reduce]      gộp các bản tóm tắt con
-  [Persistence] UPDATE workshops SET summary_md = ..., summary_generated_at = now()
-                → Supabase Realtime broadcast → FE cập nhật UI
-```
-
-Giới hạn: PDF only, max 5MB, max 3 lần tóm tắt/workshop. Text < 50 từ → `PDF_NO_TEXT`. OpenAI 429/503 → retry tối đa 3 lần exponential backoff.
-
-### 6. Notification — Event-based + Outbox Pattern
-
-```
-Registration Service
-  ├─ BEGIN transaction
-  ├─ UPDATE workshops SET seats_remaining - 1
-  ├─ INSERT registrations (confirmed, qr_token)
-  ├─ INSERT notifications (in-app)    ← Outbox: cùng transaction, at-least-once
-  ├─ COMMIT
-  └─ EventEmitter.emit('RegistrationConfirmed')   ← SAU commit (không trong tx)
-
-Notification Service (bất đồng bộ, không block response)
-  ├─ InAppNotifier  → Supabase Realtime broadcast → FE WebSocket toast
-  └─ EmailNotifier  → SMTP mock (console.log)
-  → Promise.allSettled(): 1 kênh lỗi không ảnh hưởng kênh còn lại
-
-Cron 5 phút: retry notifications kẹt (status 'pending'/'failed', retry_count < 3,
-             updated_at < now() - 2 phút)
-```
-
-Thêm kênh mới: chỉ implement class `INotifier` + đăng ký DI container. Không sửa Registration Service hoặc Notification Service (OCP).
-
-### 7. CSV Import — Batch Sequential ETL
-
-Cron `02:00` hàng ngày (node-cron in-process) hoặc trigger thủ công `POST /admin/csv-import`:
-
-```
-Extract   → PapaParse stream (fs.createReadStream + step mode, không load RAM)
-Validate  → Header phải có mssv, full_name. Lỗi header: fail-fast toàn file.
-            Lỗi từng dòng (MSSV rỗng, full_name rỗng): skip, ghi log → tiếp tục
-Transform → trim, dedup trong file
-Load      → Bulk upsert lô 1000 dòng:
-              INSERT ... ON CONFLICT (mssv) DO UPDATE SET full_name=..., is_active=true
-            Soft-delete: UPDATE students SET is_active=false WHERE mssv NOT IN (batch)
-            File rỗng (0 dòng): KHÔNG soft-delete (tránh vô tình wipe toàn bộ DB)
-            File cũ (source_date ≤ ngày import gần nhất): bỏ qua
-```
-
-Chiến lược lỗi: **Partial Success** — service không bao giờ crash do lỗi dữ liệu. Không hard-delete (giữ toàn vẹn FK với `registrations` cũ).
-
-### 8. Rate Limiting
-
-Token Bucket, in-memory (single instance):
-
-| Scope | Ngưỡng | Hành vi khi vượt |
-|-------|--------|------------------|
-| Global | 200 req / 15 phút / IP | 429 + `Retry-After` |
-| `POST /registrations` | 20 req / phút / IP | 429 `RATE_LIMIT_EXCEEDED` |
-
-> Ngưỡng 20 (không phải 10) vì bottleneck thật là DB lock — rate limit chỉ cần shed excess burst, không gây 429 oan cho user retry hợp lệ (network lag → 3 retry + user bấm lại 2 lần ≈ 5 req / 10-20s).
-
-### 9. Workshop Catalog Cache
-
-In-memory JS Map, TTL 5s cho `GET /workshops`. 100 req/s → DB chỉ nhận 1 SELECT. Supabase Realtime push ngay khi `seats_remaining` thay đổi → FE cập nhật UI tức thì không cần reload.
-
----
-
-## Testing
 
 ```bash
-cd backend && npm test          # chạy một lần
-cd backend && npm run test:watch # watch mode
-cd frontend && npm test
+# Terminal 2: frontend
+cd frontend
+npm run dev
 ```
 
-Framework: **Vitest**.
+Mặc định:
 
-**Test cases bắt buộc (ADR-required):**
+- Backend: `http://localhost:3000`
+- Frontend: `https://localhost:5173`
 
-| Test | Kỳ vọng |
-|------|---------|
-| Race condition seat: 1000 req đồng thời, workshop 10 chỗ | Đúng 10 confirmed, 990 SEATS_SOLD_OUT |
-| Idempotency: 5 req cùng key trong 2s | 1 bản ghi, 1 charge |
-| Circuit breaker: 5 lỗi system liên tiếp | CB Open, req thứ 6 fail < 10ms (không treo 3s) |
-| CSV partial success: 10 dòng, 2 dòng lỗi format | Import 8, log 2, service không crash |
-| Offline sync gửi 2 lần cùng records | DB chỉ 1 record (`ON CONFLICT DO NOTHING`) |
-| Seat TTL: `pending_payment` tạo 20 phút trước → chạy cron | Status `expired`, `seats_remaining` khôi phục |
-| RBAC: student gọi `POST /workshops` | 403 `FORBIDDEN_ROLE` |
-| RBAC: anon xem workshop chưa publish | 404 (không 403) |
+Vite đang bật HTTPS local bằng plugin `@vitejs/plugin-basic-ssl`. Nếu trình duyệt báo certificate warning, chọn cho phép tiếp tục. Nếu gõ `localhost:5173` hoặc `localhost:3000` không vào được, thêm đầy đủ `https://` hoặc `http://` ở trước URL.
 
----
+## Tài khoản test
 
-## Quy định commit
+Khi dùng file `.env` demo đã cung cấp, có thể đăng nhập bằng các tài khoản sau:
 
-Format: `<type>(<scope>): <description>`
+| Màn hình | Tài khoản | Mật khẩu | Vai trò |
+|----------|-----------|----------|--------|
+| `/staff-login` | `admin@unihub` | `123` | Ban tổ chức |
+| `/staff-login` | `staff@unihub` | `123` | Nhân sự check-in |
+| `/login` | `23127417` | `123456` | Sinh viên, chỉ có sẵn trong DB demo |
 
-| Type | Ý nghĩa |
-|------|---------|
-| `feat` | Tính năng mới |
-| `fix` | Bug fix |
-| `refactor` | Tái cấu trúc |
-| `test` | Thêm / sửa test |
-| `chore` | Config, dependency, docs, format |
+Ghi chú:
 
+- Admin vào trang quản trị tại `/admin`.
+- Staff vào trang check-in tại `/staff`.
+- Sinh viên có thể đăng nhập bằng MSSV tại `/login`.
+- CSV mẫu có trong `legacy-data/students_nightly_2026-05-17.csv`.
+
+## Luồng test nhanh
+
+1. Vào frontend tại `https://localhost:5173`.
+2. Đăng nhập sinh viên bằng `23127417` và mật khẩu `123456`.
+3. Xem danh sách workshop, mở chi tiết workshop và đăng ký.
+4. Đăng nhập `admin@unihub` tại `/staff-login` để tạo, sửa, publish workshop, upload PDF AI Summary và xem dashboard.
+5. Đăng nhập `staff@unihub` tại `/staff-login` để quét QR và test check-in.
+6. Tắt mạng rồi quét QR trên trang staff để test lưu offline, sau đó bật mạng và bấm đồng bộ.
+
+## Import sinh viên CSV
+
+File CSV mẫu nằm trong `legacy-data/` và dùng format:
+
+```csv
+mssv,full_name
+23127417,Đào Hoàng Đức Mạnh
 ```
-feat(checkin): add offline sync with IndexedDB foreground flush
-fix(registration): handle seats_remaining race condition with atomic UPDATE
-test(payment): add circuit breaker state transition tests
-chore(deps): upgrade opossum to 8.1.0
+
+Backend có cron import lúc 02:00 hằng ngày theo múi giờ `Asia/Ho_Chi_Minh`. Ban tổ chức cũng có thể trigger import từ trang admin hoặc gọi endpoint:
+
+```text
+POST /api/v1/admin/csv-import
 ```
 
----
+Nếu body rỗng, backend sẽ lấy file `students_nightly_YYYY-MM-DD.csv` mới nhất trong `legacy-data/` hoặc `CSV_IMPORT_DIR`.
+
+## AI Summary
+
+AI Summary nhận PDF từ trang admin, backend đọc nội dung bằng `pdf-parse`, gọi OpenRouter để tạo summary Markdown và lưu vào cột `summary_md`.
+
+Nếu dùng `.env` riêng mà thiếu OpenRouter key, riêng tính năng AI Summary sẽ báo lỗi `AI_UNAVAILABLE`. Các tính năng khác vẫn chạy bình thường.
+
+## Chạy test
+
+```bash
+cd backend
+npm test
+```
+
+```bash
+cd frontend
+npm test
+```
 
 ## Tài liệu tham khảo
 
 | File | Nội dung |
-|------|---------|
-| [`blueprint/proposal.md`](blueprint/proposal.md) | Vấn đề, mục tiêu, phạm vi, rủi ro |
-| [`blueprint/design.md`](blueprint/design.md) | Kiến trúc, C4 Diagram, DB Schema, 13 ADR |
-| [`docs/techstack.md`](docs/techstack.md) | Lý do chọn từng dependency |
-| [`blueprint/specs/`](blueprint/specs/) | Đặc tả 10 module: luồng, kịch bản lỗi, acceptance criteria |
-| [`full-guide.md`](full-guide.md) | AI context guide — hard rules, API conventions, critical patterns. Khi mâu thuẫn với spec khác, file này thắng |
-| [`supabase/db_schema.sql`](supabase/db_schema.sql) | Schema đầy đủ — single source of truth |
-| [`legacy-data/README.md`](legacy-data/README.md) | Format CSV nightly, logic import, lý do không có cột email/phone |
-| [`requirement.md`](requirement.md) | Yêu cầu đồ án gốc từ giảng viên |
-| [`img/`](img/) | Sơ đồ C4 Level 1/2, DB schema, high-level (PNG + SVG) |
+|------|----------|
+| `blueprint/proposal.md` | Bối cảnh, phạm vi và mục tiêu |
+| `blueprint/design.md` | Kiến trúc, RBAC, API, database schema, ADR |
+| `blueprint/specs/` | Spec chi tiết từng module |
+| `full-guide.md` | Quy ước kỹ thuật chính của repo |
+| `supabase/db_schema.sql` | Schema Supabase hiện tại |
+| `legacy-data/README.md` | Hướng dẫn CSV nightly |

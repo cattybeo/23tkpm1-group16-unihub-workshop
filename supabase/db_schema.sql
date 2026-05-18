@@ -605,17 +605,16 @@ grant execute on function public.notify_workshop_change(uuid, text, text)       
 -- ============================================================================
 -- 18. STORAGE — bucket workshop-assets (organizer upload)
 -- ----------------------------------------------------------------------------
--- ⚠️  Bucket tạo thủ công 1 lần qua Dashboard → Storage (Supabase chặn DROP
--- bucket bằng SQL). Uncomment block insert bên dưới khi setup project mới.
+-- Clone DB cần có bucket + policies để upload ảnh bìa/sơ đồ phòng hoạt động
+-- ngay sau khi chạy schema.
 -- ============================================================================
-/*
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('workshop-assets', 'workshop-assets', true, 5242880, array['image/jpeg','image/png','image/webp'])
 on conflict (id) do nothing;
 
+drop policy if exists "workshop_assets_read_public" on storage.objects;
 create policy "workshop_assets_read_public" on storage.objects
   for select using (bucket_id = 'workshop-assets');
-*/
 
 drop policy if exists "workshop_assets_insert_organizer" on storage.objects;
 create policy "workshop_assets_insert_organizer" on storage.objects
@@ -637,11 +636,228 @@ create policy "workshop_assets_delete_organizer" on storage.objects
   using (bucket_id = 'workshop-assets' and exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role = 'organizer'));
 
 
--- =============================================================================
--- KẾT THÚC SCHEMA DUMP
--- =============================================================================
--- VERIFY:
---   select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' order by proname;
---   select policyname, tablename from pg_policies where schemaname='public' order by tablename;
---   select pubname, tablename from pg_publication_tables where tablename in ('notifications','workshops');
--- =============================================================================
+-- ============================================================================
+-- 19. SEED AUTH ACCOUNTS — admin/staff only
+-- ----------------------------------------------------------------------------
+-- Idempotent seed cho DB fresh. Nếu user đã tồn tại theo email, cập nhật lại
+-- mật khẩu/profile thay vì tạo trùng auth.users.
+-- ============================================================================
+do $$
+declare
+  v_admin_id uuid;
+  v_staff_id uuid;
+  v_now timestamptz := now();
+begin
+  select id into v_admin_id from auth.users where lower(email) = 'admin@unihub';
+  if v_admin_id is null then
+    v_admin_id := '11111111-1111-4111-8111-111111111111'::uuid;
+    insert into auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      last_sign_in_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      created_at,
+      updated_at,
+      confirmation_token,
+      email_change,
+      email_change_token_new,
+      recovery_token
+    )
+    values (
+      '00000000-0000-0000-0000-000000000000',
+      v_admin_id,
+      'authenticated',
+      'authenticated',
+      'admin@unihub',
+      crypt('123', gen_salt('bf')),
+      v_now,
+      v_now,
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"account":"admin","display_name":"Ban tổ chức","email_verified":true}'::jsonb,
+      v_now,
+      v_now,
+      '',
+      '',
+      '',
+      ''
+    );
+  else
+    update auth.users
+       set encrypted_password = crypt('123', gen_salt('bf')),
+           email_confirmed_at = coalesce(email_confirmed_at, v_now),
+           raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+           raw_user_meta_data = '{"account":"admin","display_name":"Ban tổ chức","email_verified":true}'::jsonb,
+           updated_at = v_now
+     where id = v_admin_id;
+  end if;
+
+  insert into auth.identities (
+    id,
+    user_id,
+    provider_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  )
+  values (
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    v_admin_id,
+    v_admin_id::text,
+    jsonb_build_object('sub', v_admin_id::text, 'email', 'admin@unihub', 'email_verified', true),
+    'email',
+    v_now,
+    v_now,
+    v_now
+  )
+  on conflict (provider_id, provider) do update
+    set user_id = excluded.user_id,
+        identity_data = excluded.identity_data,
+        updated_at = excluded.updated_at;
+
+  insert into public.profiles (id, role, mssv, display_name, must_change_password)
+  values (v_admin_id, 'organizer'::user_role, null, 'Ban tổ chức', false)
+  on conflict (id) do update
+    set role = excluded.role,
+        mssv = excluded.mssv,
+        display_name = excluded.display_name,
+        must_change_password = excluded.must_change_password;
+
+  select id into v_staff_id from auth.users where lower(email) = 'staff@unihub';
+  if v_staff_id is null then
+    v_staff_id := '22222222-2222-4222-8222-222222222222'::uuid;
+    insert into auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      last_sign_in_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      created_at,
+      updated_at,
+      confirmation_token,
+      email_change,
+      email_change_token_new,
+      recovery_token
+    )
+    values (
+      '00000000-0000-0000-0000-000000000000',
+      v_staff_id,
+      'authenticated',
+      'authenticated',
+      'staff@unihub',
+      crypt('123', gen_salt('bf')),
+      v_now,
+      v_now,
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"account":"staff","display_name":"Nhân sự check-in","email_verified":true}'::jsonb,
+      v_now,
+      v_now,
+      '',
+      '',
+      '',
+      ''
+    );
+  else
+    update auth.users
+       set encrypted_password = crypt('123', gen_salt('bf')),
+           email_confirmed_at = coalesce(email_confirmed_at, v_now),
+           raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+           raw_user_meta_data = '{"account":"staff","display_name":"Nhân sự check-in","email_verified":true}'::jsonb,
+           updated_at = v_now
+     where id = v_staff_id;
+  end if;
+
+  insert into auth.identities (
+    id,
+    user_id,
+    provider_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  )
+  values (
+    'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2',
+    v_staff_id,
+    v_staff_id::text,
+    jsonb_build_object('sub', v_staff_id::text, 'email', 'staff@unihub', 'email_verified', true),
+    'email',
+    v_now,
+    v_now,
+    v_now
+  )
+  on conflict (provider_id, provider) do update
+    set user_id = excluded.user_id,
+        identity_data = excluded.identity_data,
+        updated_at = excluded.updated_at;
+
+  insert into public.profiles (id, role, mssv, display_name, must_change_password)
+  values (v_staff_id, 'staff'::user_role, null, 'Nhân sự check-in', false)
+  on conflict (id) do update
+    set role = excluded.role,
+        mssv = excluded.mssv,
+        display_name = excluded.display_name,
+        must_change_password = excluded.must_change_password;
+end $$;
+
+
+-- ============================================================================
+-- 20. AI SUMMARY STATUS
+-- ============================================================================
+alter table workshops
+  add column if not exists summary_status text not null default 'idle',
+  add column if not exists summary_attempts integer not null default 0,
+  add column if not exists summary_error_code text,
+  add column if not exists summary_error_message text;
+
+alter table workshops
+  drop constraint if exists workshops_summary_status_check,
+  add constraint workshops_summary_status_check
+    check (summary_status in ('idle', 'processing', 'completed', 'failed'));
+
+alter table workshops
+  drop constraint if exists workshops_summary_attempts_check,
+  add constraint workshops_summary_attempts_check
+    check (summary_attempts >= 0 and summary_attempts <= 3);
+
+create or replace function public.claim_workshop_summary_attempt(p_workshop_id uuid)
+returns table (
+  workshop_id uuid,
+  attempts_used integer,
+  status text
+)
+language plpgsql
+set search_path = public
+as $$
+begin
+  return query
+  update workshops
+     set summary_status = 'processing',
+         summary_attempts = summary_attempts + 1,
+         summary_error_code = null,
+         summary_error_message = null
+   where id = p_workshop_id
+     and cancelled_at is null
+     and summary_status <> 'processing'
+     and summary_attempts < 3
+   returning id, summary_attempts, summary_status;
+end;
+$$;
+
+revoke all on function public.claim_workshop_summary_attempt(uuid) from public, anon, authenticated;
+grant execute on function public.claim_workshop_summary_attempt(uuid) to service_role;
+
+notify pgrst, 'reload schema';
