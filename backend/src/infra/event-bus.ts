@@ -6,4 +6,12 @@ export interface RegistrationConfirmedEvent {
   notificationId: string
 }
 
+export const WORKSHOP_CHANGED_EVENT = 'WorkshopChanged' as const
+
+export interface WorkshopChangedEvent {
+  workshopId: string
+  notificationTitle: string
+  notificationBody: string
+}
+
 export const eventBus = new EventEmitter()
