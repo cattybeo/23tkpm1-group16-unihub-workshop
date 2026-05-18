@@ -138,4 +138,38 @@ export function requireRole(roles: UserRole[]) {
   }
 }
 
+export async function verifyJwtFlexible(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const headerToken = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice(7).trim()
+    : null
+  const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : null
+  const token = headerToken ?? queryToken
+
+  if (!token) {
+    sendError(res, 401, 'UNAUTHENTICATED', 'Missing token (Authorization header hoặc ?token=)')
+    return
+  }
+
+  const { data, error } = await supabase.auth.getUser(token)
+  if (error) {
+    if (isExpiredTokenError(error)) {
+      sendError(res, 401, 'TOKEN_EXPIRED', 'Token expired')
+      return
+    }
+    sendError(res, 401, 'INVALID_TOKEN', 'Invalid token')
+    return
+  }
+
+  if (!data.user) {
+    sendError(res, 401, 'INVALID_TOKEN', 'Invalid token')
+    return
+  }
+
+  req.authUser = {
+    id: data.user.id,
+    email: data.user.email ?? null,
+  }
+  next()
+}
+
 export const requireAuthenticated = [verifyJwt, loadProfile] as const

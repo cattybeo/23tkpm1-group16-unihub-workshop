@@ -12,7 +12,7 @@ vi.mock('../lib/supabase.js', () => ({
   supabase: supabaseMock,
 }))
 
-import { loadProfile, requireRole, verifyJwt } from './auth.js'
+import { loadProfile, requireRole, verifyJwt, verifyJwtFlexible } from './auth.js'
 
 const USER_ID = 'e42833a1-0e87-48e1-a67d-2f5739eb8945'
 
@@ -99,6 +99,35 @@ describe('auth middleware', () => {
 
     expect(res.statusCodeValue).toBe(401)
     expect(res.body).toMatchObject({ error: { code: 'TOKEN_EXPIRED' } })
+  })
+
+  it('returns UNAUTHENTICATED when flexible auth has no header or query token', async () => {
+    const req = { headers: {}, query: {} } as Request
+    const res = createResponse()
+    const next = vi.fn() as NextFunction
+
+    await verifyJwtFlexible(req, res, next)
+
+    expect(res.statusCodeValue).toBe(401)
+    expect(res.body).toMatchObject({ error: { code: 'UNAUTHENTICATED' } })
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('accepts a query token for browser-triggered import routes', async () => {
+    supabaseMock.auth.getUser.mockResolvedValue({
+      data: { user: { id: USER_ID, email: 'admin@student.hcmus.edu.vn' } },
+      error: null,
+    })
+
+    const req = { headers: {}, query: { token: 'query-jwt' } } as unknown as Request
+    const res = createResponse()
+    const next = vi.fn() as NextFunction
+
+    await verifyJwtFlexible(req, res, next)
+
+    expect(req.authUser).toEqual({ id: USER_ID, email: 'admin@student.hcmus.edu.vn' })
+    expect(supabaseMock.auth.getUser).toHaveBeenCalledWith('query-jwt')
+    expect(next).toHaveBeenCalledOnce()
   })
 
   it('loads profile on every request so role changes are effective immediately', async () => {
