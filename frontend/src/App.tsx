@@ -9,12 +9,14 @@ import { Footer } from '@/components/GlobalFooter';
 import { DiscoverPage } from '@/pages/DiscoverPage';
 import { WorkshopDetailPage } from '@/pages/WorkshopDetailPage';
 import { MyTicketsPage } from '@/pages/MyTicketsPage';
+import { UserSettingsPage } from '@/pages/UserSettingsPage';
+import { AccountPage } from '@/pages/AccountPage';
 import { AdminPage } from '@/pages/AdminPage';
-import { AdminDashboard } from '@/pages/AdminDashboard';
 import { StaffPage } from '@/pages/StaffPage';
-import { ScannerPage } from '@/pages/ScannerPage';
+import { PaymentPage } from '@/pages/PaymentPage';
 import LoginPage from '@/pages/LoginPage';
 import ChangePasswordPage from '@/pages/ChangePasswordPage';
+import StaffLoginPage from '@/pages/StaffLoginPage';
 
 function AuthGuard() {
   const { session, profile, loading } = useAuth();
@@ -33,14 +35,25 @@ function AuthGuard() {
   return <Outlet />;
 }
 
+function getHomeRoute(role: 'student' | 'organizer' | 'staff'): string {
+  if (role === 'staff') return '/staff'
+  if (role === 'organizer') return '/admin'
+  return '/'
+}
+
 function RoleGuard({ allowedRoles }: { allowedRoles: Array<'organizer' | 'staff' | 'student'> }) {
   const { profile } = useAuth();
 
   if (!profile || !allowedRoles.includes(profile.role)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={getHomeRoute(profile?.role ?? 'student')} replace />;
   }
 
   return <Outlet />;
+}
+
+function RoleRedirect() {
+  const { profile } = useAuth();
+  return <Navigate to={getHomeRoute(profile?.role ?? 'student')} replace />;
 }
 
 function Layout() {
@@ -58,34 +71,50 @@ function Layout() {
   );
 }
 
+const CHROMELESS_PATHS = ['/staff', '/admin', '/payment'];
+
 function AppShell() {
   const location = useLocation();
-  const isStaffRoute = location.pathname === '/staff';
+  const isChromelessRoute = CHROMELESS_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
 
   return (
-    <div className="min-h-screen bg-[#F2F2F7] font-[system-ui,-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif]">
-      {!isStaffRoute && <Header />}
+    <div className="min-h-screen flex flex-col bg-[#F2F2F7] font-[system-ui,-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif]">
+      {!isChromelessRoute && <Header />}
+      <div className="flex-1 flex flex-col">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/staff-login" element={<StaffLoginPage />} />
         <Route path="/change-password" element={<ChangePasswordPage />} />
 
-        {/* Routes yêu cầu đăng nhập */}
         <Route element={<AuthGuard />}>
-          <Route path="admin" element={<AdminPage />} />
-          <Route path="admin-dashboard" element={<AdminDashboard />} />
-          <Route path="scanner" element={<ScannerPage />} />
+          {/* Organizer only */}
+          <Route element={<RoleGuard allowedRoles={['organizer']} />}>
+            <Route path="admin" element={<AdminPage />} />
+          </Route>
+
+          {/* Organizer + Staff */}
           <Route element={<RoleGuard allowedRoles={['organizer', 'staff']} />}>
             <Route path="staff" element={<StaffPage />} />
           </Route>
-          <Route element={<Layout />}>
-            <Route index element={<DiscoverPage />} />
-            <Route path="workshop/:id" element={<WorkshopDetailPage />} />
-            <Route path="tickets" element={<MyTicketsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+
+          {/* Student only */}
+          <Route element={<RoleGuard allowedRoles={['student']} />}>
+            <Route path="payment" element={<PaymentPage />} />
+            <Route element={<Layout />}>
+              <Route index element={<DiscoverPage />} />
+              <Route path="workshop/:id" element={<WorkshopDetailPage />} />
+              <Route path="tickets" element={<MyTicketsPage />} />
+              <Route path="settings" element={<UserSettingsPage />} />
+              <Route path="account" element={<AccountPage />} />
+            </Route>
           </Route>
+
+          {/* Unknown routes → role home */}
+          <Route path="*" element={<RoleRedirect />} />
         </Route>
       </Routes>
-      {!isStaffRoute && <Footer />}
+      </div>
+      {!isChromelessRoute && <Footer />}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   type NotificationDto,
 } from './notifications-api'
 import { useAuth } from './auth-context'
+import { supabase } from './supabase'
 
 interface NotificationsContextValue {
   notifications: NotificationDto[]
@@ -65,20 +66,46 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     void refresh()
     if (!accessToken) return undefined
 
-    const intervalId = window.setInterval(() => {
-      void refresh()
-    }, 60_000)
-
     const onFocus = () => {
       void refresh()
     }
     window.addEventListener('focus', onFocus)
 
     return () => {
-      window.clearInterval(intervalId)
       window.removeEventListener('focus', onFocus)
     }
   }, [accessToken, refresh])
+
+  useEffect(() => {
+    const userId = profile?.id
+    if (!accessToken || !userId) return undefined
+
+    const channel = supabase
+      .channel(`notifications-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        payload => {
+          const row = payload.new as NotificationDto
+          setNotifications(current => (
+            current.some(item => item.id === row.id) ? current : [row, ...current]
+          ))
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        payload => {
+          const row = payload.new as NotificationDto
+          setNotifications(current => current.map(item => (item.id === row.id ? row : item)))
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [accessToken, profile?.id])
 
   const unreadCount = useMemo(
     () => notifications.filter(notification => notification.read_at === null).length,
