@@ -7,7 +7,7 @@ import {
   ChevronRight,
   Clock,
   Home,
-  Keyboard,
+
   LogOut,
   MapPin,
   QrCode,
@@ -20,10 +20,15 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api-client';
 import {
   clearStaffQueue,
+  getStaffWorkshopCache,
+  getWorkshopRoster,
   listPendingCheckIns,
   removePendingCheckIns,
+  saveStaffWorkshopCache,
+  saveWorkshopRoster,
   savePendingCheckIn,
 } from '@/lib/staff-storage';
 import type {
@@ -33,53 +38,38 @@ import type {
   StaffWorkshop,
   SyncStatus,
 } from '@/types/staff';
+import type { WorkshopRow } from '@/types/workshop';
 
 const STAFF_CAMERA_REGION_ID = 'unihub-staff-camera';
-const CURRENT_TIME_MINUTES = 10 * 60 + 30;
 
-const WORKSHOPS_TODAY: StaffWorkshop[] = [
-  {
-    id: 'w1',
-    title: 'Talkshow: Lộ trình Kỹ sư Phần mềm',
-    room: 'Hội trường T',
-    startTime: '08:00',
-    endTime: '10:00',
-    capacity: 350,
-    registered: 350,
-  },
-  {
-    id: 'w2',
-    title: 'Seminar: Tối ưu hoá Hệ thống phân tán',
-    room: 'Giảng đường 1, Tòa nhà I',
-    startTime: '09:30',
-    endTime: '11:30',
-    capacity: 150,
-    registered: 142,
-  },
-  {
-    id: 'w3',
-    title: 'Chuỗi Kỹ năng: Viết CV và Phỏng vấn',
-    room: 'Phòng Lab C.31',
-    startTime: '13:30',
-    endTime: '16:30',
-    capacity: 100,
-    registered: 80,
-  },
-];
+function pad2(n: number) {
+  return n < 10 ? `0${n}` : `${n}`;
+}
 
-const INITIAL_STUDENTS: StaffStudent[] = [
-  { mssv: '21127001', name: 'Nguyễn Văn An', status: 'confirmed' },
-  { mssv: '21127002', name: 'Trần Thị Bình', status: 'confirmed' },
-  { mssv: '21127003', name: 'Lê Hoàng Cường', status: 'pending_payment' },
-  { mssv: '21127004', name: 'Phạm Đức Dũng', status: 'confirmed' },
-  { mssv: '22127005', name: 'Hoàng Thanh E', status: 'confirmed' },
-];
+function workshopRowToStaff(row: WorkshopRow): StaffWorkshop {
+  const start = new Date(row.start_time);
+  const end = new Date(row.end_time);
+  return {
+    id: row.id,
+    title: row.title,
+    room: row.room,
+    startTime: `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
+    endTime: `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
+    capacity: row.capacity,
+    registered: row.capacity - row.seats_remaining,
+  };
+}
 
-const DEMO_QR_TOKENS: Record<string, { mssv: string; name: string; workshopId: string }> = {
-  'qr-an-w2-demo': { mssv: '21127001', name: 'Nguyễn Văn An', workshopId: 'w2' },
-  'qr-binh-w2-demo': { mssv: '21127002', name: 'Trần Thị Bình', workshopId: 'w2' },
-  'qr-dung-w3-demo': { mssv: '21127004', name: 'Phạm Đức Dũng', workshopId: 'w3' },
-};
+function isSameLocalDay(iso: string, ref: Date) {
+  const d = new Date(iso);
+  return d.getFullYear() === ref.getFullYear()
+    && d.getMonth() === ref.getMonth()
+    && d.getDate() === ref.getDate();
+}
+
+function getLocalDateKey(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
 
 function timeToMinutes(time: string) {
   const [hours, minutes] = time.split(':').map(Number);
@@ -100,6 +90,41 @@ function formatScanTime() {
   return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function getApiErrorCode(err: unknown): string {
+  return err && typeof err === 'object' && 'code' in err && typeof err.code === 'string' ? err.code : '';
+}
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  return err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+    ? err.message
+    : fallback;
+}
+
+function matchesStudentQuery(student: StaffStudent, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  return student.mssv.toLowerCase().includes(normalizedQuery) || student.name.toLowerCase().includes(normalizedQuery);
+}
+
+function applyQueuedStatus(students: StaffStudent[], queue: OfflineCheckInRecord[]): StaffStudent[] {
+  const queuedTokens = new Set(queue.map(record => record.qr_token));
+  return students.map(student => (
+    student.qr_token && queuedTokens.has(student.qr_token) && student.status === 'confirmed'
+      ? { ...student, status: 'queued' }
+      : student
+  ));
+}
+
+async function fetchAndCacheRoster(workshopId: string): Promise<void> {
+  const students = await api.get<StaffStudent[]>(
+    `/check-ins/registrations/cache?workshop_id=${encodeURIComponent(workshopId)}`,
+  );
+  await saveWorkshopRoster({
+    workshop_id: workshopId,
+    fetched_at: new Date().toISOString(),
+    students,
+  });
+}
+
 export function StaffPage() {
   const { profile, logout } = useAuth();
   const [mainTab, setMainTab] = useState<'home' | 'settings'>('home');
@@ -111,13 +136,92 @@ export function StaffPage() {
   const [scannedToday, setScannedToday] = useState(0);
   const [scanFeedback, setScanFeedback] = useState<ScanFeedback>({ status: 'idle' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [localStudents, setLocalStudents] = useState<StaffStudent[]>(INITIAL_STUDENTS);
+  const [lookupStudents, setLookupStudents] = useState<StaffStudent[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [rosterCachedAt, setRosterCachedAt] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [manualToken, setManualToken] = useState('');
+
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [workshops, setWorkshops] = useState<StaffWorkshop[]>([]);
+  const [workshopsLoading, setWorkshopsLoading] = useState(true);
+  const [workshopsError, setWorkshopsError] = useState<string | null>(null);
+  const [workshopsCachedAt, setWorkshopsCachedAt] = useState<string | null>(null);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const lastScanRef = useRef('');
   const syncInFlightRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const today = new Date();
+    const todayKey = getLocalDateKey(today);
+
+    setWorkshopsLoading(true);
+
+    getStaffWorkshopCache(todayKey)
+      .then(cache => {
+        if (cancelled || !cache) return;
+        setWorkshops(cache.workshops);
+        setWorkshopsCachedAt(cache.fetched_at);
+        setWorkshopsError(null);
+      })
+      .catch(() => undefined);
+
+    api.get<WorkshopRow[]>('/workshops')
+      .then(rows => {
+        if (cancelled) return;
+        const todayWorkshops = rows
+          .filter(row => isSameLocalDay(row.start_time, today))
+          .map(workshopRowToStaff);
+        setWorkshops(todayWorkshops);
+        setWorkshopsCachedAt(null);
+        setWorkshopsError(null);
+        void saveStaffWorkshopCache({
+          date_key: todayKey,
+          fetched_at: new Date().toISOString(),
+          workshops: todayWorkshops,
+        });
+        void Promise.allSettled(todayWorkshops.map(workshop => fetchAndCacheRoster(workshop.id)));
+      })
+      .catch(async () => {
+        if (cancelled) return;
+        const cache = await getStaffWorkshopCache(todayKey).catch(() => null);
+        if (cancelled) return;
+        if (cache) {
+          setWorkshops(cache.workshops);
+          setWorkshopsCachedAt(cache.fetched_at);
+          setWorkshopsError(null);
+          return;
+        }
+        setWorkshopsError('Chưa có dữ liệu offline. Mở app một lần khi có mạng để tải danh sách trạm.');
+      })
+      .finally(() => {
+        if (!cancelled) setWorkshopsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const markCachedStudentStatus = useCallback(async (
+    workshopId: string,
+    predicate: (student: StaffStudent) => boolean,
+    status: StaffStudent['status'],
+  ) => {
+    const cache = await getWorkshopRoster(workshopId);
+    if (!cache) return;
+
+    const nextCache = {
+      ...cache,
+      students: cache.students.map(student => (
+        predicate(student) ? { ...student, status } : student
+      )),
+    };
+    await saveWorkshopRoster(nextCache);
+    setLookupStudents(students => students.map(student => (
+      predicate(student) ? { ...student, status } : student
+    )));
+  }, []);
 
   const reloadQueue = useCallback(async () => {
     const records = await listPendingCheckIns();
@@ -144,16 +248,32 @@ export function StaffPage() {
         return;
       }
 
-      await new Promise(resolve => window.setTimeout(resolve, 500));
-      await removePendingCheckIns(pendingRecords.map(record => record.client_id));
-      setSyncQueue([]);
+      const result = await api.post<{ synced: string[]; errors: { client_id: string; code: string; message: string }[] }>(
+        '/check-ins/sync',
+        { records: pendingRecords },
+      );
+
+      if (result.synced.length > 0) {
+        const syncedIds = new Set(result.synced);
+        const syncedRecords = pendingRecords.filter(record => syncedIds.has(record.client_id));
+        for (const record of syncedRecords) {
+          await markCachedStudentStatus(record.workshop_id, student => student.qr_token === record.qr_token, 'checked_in');
+        }
+        await removePendingCheckIns(result.synced);
+      }
+
+      if (result.errors.length > 0) {
+        await removePendingCheckIns(result.errors.map(e => e.client_id));
+      }
+
+      await reloadQueue();
       setSyncStatus('success');
     } catch {
       setSyncStatus('error');
     } finally {
       syncInFlightRef.current = false;
     }
-  }, []);
+  }, [markCachedStudentStatus, reloadQueue]);
 
   useEffect(() => {
     void reloadQueue();
@@ -162,7 +282,7 @@ export function StaffPage() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      void syncPendingRecords();
+      setSyncStatus('idle');
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -175,7 +295,40 @@ export function StaffPage() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [syncPendingRecords]);
+  }, []);
+
+  useEffect(() => {
+    if (!activeStation) {
+      setRosterCachedAt(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setRosterCachedAt(null);
+
+    getWorkshopRoster(activeStation.id)
+      .then(cache => {
+        if (!cancelled) setRosterCachedAt(cache?.fetched_at ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRosterCachedAt(null);
+      });
+
+    if (!isOnline) return () => {
+      cancelled = true;
+    };
+
+    fetchAndCacheRoster(activeStation.id)
+      .then(() => getWorkshopRoster(activeStation.id))
+      .then(cache => {
+        if (!cancelled) setRosterCachedAt(cache?.fetched_at ?? null);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStation, isOnline]);
 
   useEffect(() => {
     if (scanFeedback.status === 'idle') return undefined;
@@ -191,42 +344,92 @@ export function StaffPage() {
     const upcoming: StaffWorkshop[] = [];
     const ended: StaffWorkshop[] = [];
 
-    WORKSHOPS_TODAY.forEach(workshop => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    workshops.forEach(workshop => {
       const start = timeToMinutes(workshop.startTime);
       const end = timeToMinutes(workshop.endTime);
 
-      if (CURRENT_TIME_MINUTES > end) ended.push(workshop);
-      else if (CURRENT_TIME_MINUTES >= start && CURRENT_TIME_MINUTES <= end) ongoing.push(workshop);
+      if (currentMinutes > end) ended.push(workshop);
+      else if (currentMinutes >= start && currentMinutes <= end) ongoing.push(workshop);
       else upcoming.push(workshop);
     });
 
     return { ongoing, upcoming, ended };
-  }, []);
+  }, [workshops]);
 
-  const filteredStudents = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (query.length < 2) return [];
-    return localStudents.filter(student => (
-      student.mssv.includes(query) || student.name.toLowerCase().includes(query)
-    ));
-  }, [localStudents, searchQuery]);
+  useEffect(() => {
+    if (!activeStation || stationTab !== 'lookup') return undefined;
 
-  const completeSuccessfulScan = useCallback((studentMssv: string, token: string, name: string) => {
-    setLocalStudents(students => students.map(student => (
-      student.mssv === studentMssv ? { ...student, status: 'checked_in' } : student
-    )));
-    setScannedToday(count => count + 1);
-    setScanFeedback({
-      status: 'success',
-      title: 'HỢP LỆ',
-      message: `${name} · ${formatScanTime()}`,
-      token,
-    });
-  }, []);
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setLookupStudents([]);
+      setLookupLoading(false);
+      setLookupError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLookupLoading(true);
+    setLookupError(null);
+
+    const timeoutId = window.setTimeout(() => {
+      if (!isOnline) {
+        getWorkshopRoster(activeStation.id)
+          .then(cache => {
+            if (cancelled) return;
+            if (!cache) {
+              setLookupStudents([]);
+              setLookupError('Chưa có dữ liệu tra mã offline cho workshop này. Hãy mở trạm khi có mạng để tải danh sách đăng ký.');
+              return;
+            }
+
+            const matchedStudents = applyQueuedStatus(cache.students, syncQueue)
+              .filter(student => matchesStudentQuery(student, query))
+              .slice(0, 20);
+            setLookupStudents(matchedStudents);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setLookupStudents([]);
+              setLookupError('Không thể đọc dữ liệu tra mã offline.');
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setLookupLoading(false);
+          });
+        return;
+      }
+
+      api.get<StaffStudent[]>(
+        `/check-ins/registrations?workshop_id=${encodeURIComponent(activeStation.id)}&q=${encodeURIComponent(query)}`,
+      )
+        .then(students => {
+          if (!cancelled) setLookupStudents(applyQueuedStatus(students, syncQueue));
+        })
+        .catch(err => {
+          if (!cancelled) {
+            setLookupStudents([]);
+            setLookupError(getApiErrorMessage(err, 'Không thể tra cứu danh sách đăng ký.'));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLookupLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeStation, isOnline, searchQuery, stationTab, syncQueue]);
+
 
   const queueOfflineScan = useCallback(async (token: string, workshopId: string) => {
     const record = createOfflineRecord(token, workshopId);
     await savePendingCheckIn(record);
+    await markCachedStudentStatus(workshopId, student => student.qr_token === token, 'queued');
     await reloadQueue();
     setScannedToday(count => count + 1);
     setScanFeedback({
@@ -235,7 +438,7 @@ export function StaffPage() {
       message: 'Mất mạng, vé sẽ được đồng bộ khi có kết nối.',
       token,
     });
-  }, [reloadQueue]);
+  }, [markCachedStudentStatus, reloadQueue]);
 
   const handleScanToken = useCallback(async (token: string) => {
     if (!activeStation) return;
@@ -248,46 +451,30 @@ export function StaffPage() {
       return;
     }
 
-    const ticket = DEMO_QR_TOKENS[normalizedToken];
-    if (!ticket) {
+    try {
+      await api.post('/check-ins', { qr_token: normalizedToken, workshop_id: activeStation.id });
+      setScannedToday(count => count + 1);
       setScanFeedback({
-        status: 'error',
-        title: 'TỪ CHỐI',
-        message: 'Mã QR không hợp lệ trong dữ liệu demo.',
+        status: 'success',
+        title: 'HỢP LỆ',
+        message: formatScanTime(),
+        token: normalizedToken,
       });
-      return;
+    } catch (err: unknown) {
+      const code = getApiErrorCode(err);
+      if (code === 'ALREADY_CHECKED_IN') {
+        setScanFeedback({ status: 'error', title: 'ĐÃ CHECK-IN', message: 'Sinh viên này đã được ghi nhận trước đó.' });
+      } else if (code === 'WRONG_WORKSHOP') {
+        setScanFeedback({ status: 'error', title: 'SAI PHÒNG', message: 'Vé này thuộc workshop khác.' });
+      } else if (code === 'INVALID_STATUS') {
+        setScanFeedback({ status: 'error', title: 'CHƯA THANH TOÁN', message: 'Vé chưa được xác nhận thanh toán.' });
+      } else if (code === 'TICKET_NOT_FOUND') {
+        setScanFeedback({ status: 'error', title: 'TỪ CHỐI', message: 'Mã QR không hợp lệ.' });
+      } else {
+        await queueOfflineScan(normalizedToken, activeStation.id);
+      }
     }
-
-    if (ticket.workshopId !== activeStation.id) {
-      setScanFeedback({
-        status: 'error',
-        title: 'SAI PHÒNG',
-        message: 'Vé này thuộc workshop khác.',
-      });
-      return;
-    }
-
-    const student = localStudents.find(item => item.mssv === ticket.mssv);
-    if (student?.status === 'pending_payment') {
-      setScanFeedback({
-        status: 'error',
-        title: 'CHƯA THANH TOÁN',
-        message: `${ticket.name} chưa có vé confirmed.`,
-      });
-      return;
-    }
-
-    if (student?.status === 'checked_in') {
-      setScanFeedback({
-        status: 'error',
-        title: 'ĐÃ CHECK-IN',
-        message: `${ticket.name} đã được ghi nhận trước đó.`,
-      });
-      return;
-    }
-
-    completeSuccessfulScan(ticket.mssv, normalizedToken, ticket.name);
-  }, [activeStation, completeSuccessfulScan, isOnline, localStudents, queueOfflineScan]);
+  }, [activeStation, isOnline, queueOfflineScan]);
 
   useEffect(() => {
     if (!activeStation || stationTab !== 'scan') return undefined;
@@ -311,7 +498,7 @@ export function StaffPage() {
 
         startPromise = html5QrCode.start(
           preferredCamera.id,
-          { fps: 10, qrbox: { width: 240, height: 240 }, aspectRatio: 1 },
+          { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.333 },
           decodedText => {
             if (!decodedText || decodedText === lastScanRef.current) return;
             lastScanRef.current = decodedText;
@@ -326,7 +513,7 @@ export function StaffPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setCameraError('Không thể mở camera. Hãy cấp quyền camera hoặc nhập mã thủ công.');
+          setCameraError('Không thể mở camera. Hãy cấp quyền camera hoặc chuyển sang Tra mã để check-in thủ công.');
           setIsCameraActive(false);
         }
       });
@@ -354,34 +541,63 @@ export function StaffPage() {
     };
   }, [activeStation, handleScanToken, stationTab]);
 
-  async function handleManualSubmit() {
-    if (!manualToken.trim()) return;
-    await handleScanToken(manualToken);
-    setManualToken('');
-  }
 
   async function handleManualCheckIn(student: StaffStudent) {
     if (!activeStation) return;
+    if (student.status === 'queued') {
+      setScanFeedback({ status: 'queued', title: 'ĐÃ LƯU TẠM', message: `${student.name} đang chờ đồng bộ.`, token: student.mssv });
+      return;
+    }
     if (student.status === 'pending_payment') {
-      setScanFeedback({
-        status: 'error',
-        title: 'TỪ CHỐI',
-        message: `Trạng thái vé hiện tại là ${student.status}.`,
-      });
+      setScanFeedback({ status: 'error', title: 'TỪ CHỐI', message: 'Vé chưa được xác nhận thanh toán.' });
       return;
     }
 
     if (!navigator.onLine || !isOnline) {
-      await queueOfflineScan(`manual:${student.mssv}`, activeStation.id);
+      if (!student.qr_token) {
+        setScanFeedback({ status: 'error', title: 'KHÔNG CÓ QR', message: 'Registration này chưa có QR token để lưu offline.' });
+        return;
+      }
+      await queueOfflineScan(student.qr_token, activeStation.id);
     } else {
-      completeSuccessfulScan(student.mssv, `manual:${student.mssv}`, student.name);
+      try {
+        await api.post('/check-ins/manual', { registration_id: student.registration_id, workshop_id: activeStation.id });
+        setScannedToday(count => count + 1);
+        setLookupStudents(students => students.map(item => (
+          item.registration_id === student.registration_id ? { ...item, status: 'checked_in' } : item
+        )));
+        await markCachedStudentStatus(activeStation.id, item => item.registration_id === student.registration_id, 'checked_in');
+        setScanFeedback({ status: 'success', title: 'HỢP LỆ', message: `${student.name} · ${formatScanTime()}`, token: student.mssv });
+      } catch (err: unknown) {
+        const code = getApiErrorCode(err);
+        if (code === 'ALREADY_CHECKED_IN') {
+          setLookupStudents(students => students.map(item => (
+            item.registration_id === student.registration_id ? { ...item, status: 'checked_in' } : item
+          )));
+          await markCachedStudentStatus(activeStation.id, item => item.registration_id === student.registration_id, 'checked_in');
+          setScanFeedback({ status: 'error', title: 'ĐÃ CHECK-IN', message: `${student.name} đã được ghi nhận trước đó.` });
+        } else {
+          setScanFeedback({ status: 'error', title: 'LỖI', message: getApiErrorMessage(err, 'Không thể check-in.') });
+        }
+      }
     }
     setSearchQuery('');
   }
 
   async function handleClearQueue() {
+    const queuedRecords = [...syncQueue];
+    const revertedKeys = new Set<string>();
+
+    for (const record of queuedRecords) {
+      const cacheKey = `${record.workshop_id}:${record.qr_token}`;
+      if (revertedKeys.has(cacheKey)) continue;
+      revertedKeys.add(cacheKey);
+      await markCachedStudentStatus(record.workshop_id, student => student.qr_token === record.qr_token, 'confirmed');
+    }
+
     await clearStaffQueue();
     setSyncQueue([]);
+    setScannedToday(count => Math.max(0, count - queuedRecords.length));
     setSyncStatus('idle');
   }
 
@@ -390,6 +606,8 @@ export function StaffPage() {
     setStationTab('scan');
     setMainTab('home');
     setSearchQuery('');
+    setLookupStudents([]);
+    setLookupError(null);
     setScanFeedback({ status: 'idle' });
   }
 
@@ -397,6 +615,8 @@ export function StaffPage() {
     setActiveStation(null);
     setStationTab('scan');
     setSearchQuery('');
+    setLookupStudents([]);
+    setLookupError(null);
     setCameraError(null);
   }
 
@@ -453,20 +673,16 @@ export function StaffPage() {
   const syncButtonDisabled = syncQueue.length === 0 || !isOnline || syncStatus === 'syncing';
 
   return (
-    <div className="min-h-[100dvh] bg-black font-[system-ui,-apple-system,BlinkMacSystemFont,'SF_Pro_Text','Helvetica_Neue',sans-serif] text-[#1C1C1E] md:flex md:items-center md:justify-center">
+    <div className="flex h-[100dvh] flex-col bg-black font-[system-ui,-apple-system,BlinkMacSystemFont,'SF_Pro_Text','Helvetica_Neue',sans-serif] text-[#1C1C1E] md:items-center md:justify-center overflow-hidden">
       <style>
-        {`@keyframes unihub-scan-line {
-          0% { transform: translateY(0); opacity: 0; }
-          12% { opacity: 1; }
-          88% { opacity: 1; }
-          100% { transform: translateY(272px); opacity: 0; }
-        }`}
+        {`#${STAFF_CAMERA_REGION_ID} > div { display: none !important; }
+         #${STAFF_CAMERA_REGION_ID} video { width: 100% !important; height: 100% !important; object-fit: cover !important; }`}
       </style>
 
-      <div className="relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col overflow-hidden bg-white md:h-[852px] md:rounded-[32px] md:shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
+      <div className="relative mx-auto flex h-full w-full max-w-[430px] flex-col overflow-hidden bg-white md:h-[852px] md:rounded-[32px] md:shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
         {!activeStation ? (
           <>
-            <main className="min-h-0 flex-1 overflow-y-auto bg-[#F2F2F7] pb-[calc(86px+env(safe-area-inset-bottom))]">
+            <main className="min-h-0 flex-1 overflow-y-auto bg-[#F2F2F7]">
               {mainTab === 'home' ? (
                 <>
                   <header className="sticky top-0 z-10 border-b border-[#E5E5EA] bg-white px-[20px] pb-[18px] pt-[calc(52px+env(safe-area-inset-top))]">
@@ -476,9 +692,32 @@ export function StaffPage() {
                     </p>
                   </header>
                   <div className="space-y-[30px] p-[20px]">
-                    {renderWorkshopSection('Đang diễn ra', categorizedWorkshops.ongoing, 'primary')}
-                    {renderWorkshopSection('Sắp diễn ra', categorizedWorkshops.upcoming, 'neutral')}
-                    {renderWorkshopSection('Đã kết thúc', categorizedWorkshops.ended, 'muted')}
+                    {workshopsLoading && (
+                      <div className="flex justify-center py-[40px]">
+                        <div className="h-[28px] w-[28px] animate-spin rounded-full border-[3px] border-[#007AFF] border-t-transparent" />
+                      </div>
+                    )}
+                    {workshopsError && (
+                      <div className="rounded-[18px] border border-[#FF3B30]/15 bg-white p-[20px] text-center shadow-sm">
+                        <WifiOff className="mx-auto mb-[12px] h-[34px] w-[34px] text-[#FF3B30]" aria-hidden="true" />
+                        <p className="text-[15px] font-bold text-[#FF3B30]">{workshopsError}</p>
+                      </div>
+                    )}
+                    {!workshopsError && !workshopsLoading && workshopsCachedAt && (
+                      <div className="rounded-[14px] border border-[#FF9500]/20 bg-[#FF9500]/10 px-[14px] py-[11px] text-[13px] font-semibold text-[#A05A00]">
+                        Đang dùng danh sách trạm offline cập nhật {new Date(workshopsCachedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}.
+                      </div>
+                    )}
+                    {!workshopsLoading && !workshopsError && workshops.length === 0 && (
+                      <p className="py-[24px] text-center text-[14px] font-medium text-[#8E8E93]">Hôm nay không có workshop nào.</p>
+                    )}
+                    {!workshopsLoading && !workshopsError && workshops.length > 0 && (
+                      <>
+                        {renderWorkshopSection('Đang diễn ra', categorizedWorkshops.ongoing, 'primary')}
+                        {renderWorkshopSection('Sắp diễn ra', categorizedWorkshops.upcoming, 'neutral')}
+                        {renderWorkshopSection('Đã kết thúc', categorizedWorkshops.ended, 'muted')}
+                      </>
+                    )}
                   </div>
                 </>
               ) : (
@@ -537,7 +776,7 @@ export function StaffPage() {
               )}
             </main>
 
-            <nav className="absolute bottom-0 left-0 right-0 z-40 flex border-t border-[#E5E5EA] bg-white/90 px-[24px] pb-[calc(10px+env(safe-area-inset-bottom))] pt-[8px] backdrop-blur-xl">
+            <nav className="shrink-0 flex border-t border-[#E5E5EA] bg-white/90 px-[24px] pb-[calc(10px+env(safe-area-inset-bottom))] pt-[8px] backdrop-blur-xl">
               <button
                 type="button"
                 onClick={() => setMainTab('home')}
@@ -586,15 +825,14 @@ export function StaffPage() {
             <main className="min-h-0 flex-1 overflow-hidden">
               {stationTab === 'scan' && (
                 <section className="relative flex h-full flex-col bg-[#1C1C1E]">
-                  <div className="relative min-h-0 flex-1 overflow-hidden">
-                    <div id={STAFF_CAMERA_REGION_ID} className="h-full w-full bg-[#1C1C1E]" />
+                  <div className="relative min-h-0 flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+                    <div id={STAFF_CAMERA_REGION_ID} className="absolute inset-0 bg-[#1C1C1E]" />
                     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <div className="relative h-[280px] w-[280px]">
-                        <div className="absolute left-0 top-0 h-[42px] w-[42px] rounded-tl-[14px] border-l-[4px] border-t-[4px] border-[#34C759]" />
-                        <div className="absolute right-0 top-0 h-[42px] w-[42px] rounded-tr-[14px] border-r-[4px] border-t-[4px] border-[#34C759]" />
-                        <div className="absolute bottom-0 left-0 h-[42px] w-[42px] rounded-bl-[14px] border-b-[4px] border-l-[4px] border-[#34C759]" />
-                        <div className="absolute bottom-0 right-0 h-[42px] w-[42px] rounded-br-[14px] border-b-[4px] border-r-[4px] border-[#34C759]" />
-                        <div className="absolute left-0 top-0 h-[2px] w-full bg-[#34C759] shadow-[0_0_16px_#34C759]" style={{ animation: 'unihub-scan-line 2s ease-in-out infinite' }} />
+                      <div className="relative h-[220px] w-[220px]">
+                        <div className="absolute left-0 top-0 h-[38px] w-[38px] rounded-tl-[14px] border-l-[4px] border-t-[4px] border-white" />
+                        <div className="absolute right-0 top-0 h-[38px] w-[38px] rounded-tr-[14px] border-r-[4px] border-t-[4px] border-white" />
+                        <div className="absolute bottom-0 left-0 h-[38px] w-[38px] rounded-bl-[14px] border-b-[4px] border-l-[4px] border-white" />
+                        <div className="absolute bottom-0 right-0 h-[38px] w-[38px] rounded-br-[14px] border-b-[4px] border-r-[4px] border-white" />
                       </div>
                     </div>
 
@@ -608,28 +846,6 @@ export function StaffPage() {
                       </div>
                     )}
 
-                    <div className="absolute bottom-[18px] left-[16px] right-[16px] rounded-[18px] border border-white/15 bg-black/55 p-[14px] backdrop-blur-xl">
-                      <label htmlFor="manual-token" className="mb-[8px] flex items-center gap-[8px] text-[13px] font-semibold text-white/80">
-                        <Keyboard className="h-[16px] w-[16px]" aria-hidden="true" />
-                        Nhập token khi camera lỗi
-                      </label>
-                      <div className="flex gap-[8px]">
-                        <input
-                          id="manual-token"
-                          value={manualToken}
-                          onChange={event => setManualToken(event.target.value)}
-                          placeholder="qr-an-w2-demo"
-                          className="min-h-[44px] min-w-0 flex-1 rounded-[12px] border border-white/15 bg-white/12 px-[12px] text-[15px] font-medium text-white placeholder:text-white/40 focus:outline-none focus:ring-4 focus:ring-[#34C759]/25"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleManualSubmit()}
-                          className="min-h-[44px] rounded-[12px] bg-white px-[14px] text-[14px] font-bold text-[#1C1C1E] transition active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-white/25"
-                        >
-                          Quét
-                        </button>
-                      </div>
-                    </div>
 
                     {scanFeedback.status !== 'idle' && (
                       <div className={`absolute inset-0 z-20 flex flex-col items-center justify-center px-[32px] text-center backdrop-blur-md ${
@@ -658,7 +874,7 @@ export function StaffPage() {
                       <p className="mt-[4px] text-[28px] font-bold leading-none text-white">{scannedToday}</p>
                     </div>
                     <p className="text-right text-[12px] font-medium leading-5 text-white/55">
-                      Demo token<br />qr-an-w2-demo
+                      {isOnline ? 'Hướng camera vào QR' : `${syncQueue.length} vé đang chờ đồng bộ`}
                     </p>
                   </footer>
                 </section>
@@ -666,7 +882,10 @@ export function StaffPage() {
 
               {stationTab === 'lookup' && (
                 <section className="h-full overflow-y-auto bg-[#F2F2F7] p-[16px] pb-[calc(86px+env(safe-area-inset-bottom))]">
-                  <h2 className="mb-[16px] text-[22px] font-bold tracking-normal text-[#1C1C1E]">Tra mã sinh viên</h2>
+                  <h2 className="mb-[6px] text-[22px] font-bold tracking-normal text-[#1C1C1E]">Tra cứu check-in thủ công</h2>
+                  <p className="mb-[16px] text-[14px] leading-5 text-[#636366]">
+                    Tìm sinh viên đã đăng ký workshop này bằng MSSV hoặc tên, sau đó chọn Check-in.
+                  </p>
                   <label htmlFor="student-search" className="mb-[8px] block text-[13px] font-bold uppercase tracking-normal text-[#636366]">
                     MSSV hoặc tên
                   </label>
@@ -686,10 +905,36 @@ export function StaffPage() {
                     <p className="text-center text-[14px] font-medium text-[#8E8E93]">Nhập ít nhất 2 ký tự để tìm kiếm.</p>
                   )}
 
-                  {searchQuery.length >= 2 && (
+                  {searchQuery.trim().length === 0 && !lookupLoading && !lookupError && (
+                    <div className="rounded-[18px] border border-[#E5E5EA] bg-white p-[22px] text-center shadow-sm">
+                      <Search className="mx-auto mb-[12px] h-[34px] w-[34px] text-[#8E8E93]" aria-hidden="true" />
+                      <p className="text-[15px] font-semibold text-[#1C1C1E]">Chưa có kết quả tra cứu</p>
+                      <p className="mt-[5px] text-[13px] leading-5 text-[#636366]">
+                        {isOnline
+                          ? 'Nhập MSSV hoặc tên sinh viên để tìm trong danh sách đăng ký.'
+                          : rosterCachedAt
+                            ? `Đang dùng danh sách offline cập nhật ${new Date(rosterCachedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}.`
+                            : 'Chưa có danh sách offline cho workshop này.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {lookupLoading && (
+                    <div className="flex justify-center py-[24px]">
+                      <div className="h-[26px] w-[26px] animate-spin rounded-full border-[3px] border-[#007AFF] border-t-transparent" />
+                    </div>
+                  )}
+
+                  {lookupError && !lookupLoading && (
+                    <p className="rounded-[16px] border border-[#FF3B30]/15 bg-[#FF3B30]/10 p-[14px] text-center text-[14px] font-semibold text-[#D70015]">
+                      {lookupError}
+                    </p>
+                  )}
+
+                  {searchQuery.length >= 2 && !lookupLoading && !lookupError && (
                     <div className="overflow-hidden rounded-[18px] border border-[#E5E5EA] bg-white">
-                      {filteredStudents.length > 0 ? filteredStudents.map(student => (
-                        <div key={student.mssv} className="flex items-center justify-between gap-[12px] border-b border-[#F2F2F7] p-[16px] last:border-0">
+                      {lookupStudents.length > 0 ? lookupStudents.map(student => (
+                        <div key={student.registration_id} className="flex items-center justify-between gap-[12px] border-b border-[#F2F2F7] p-[16px] last:border-0">
                           <div className="min-w-0">
                             <p className="truncate text-[17px] font-bold text-[#1C1C1E]">{student.name}</p>
                             <p className="mt-[2px] font-mono text-[14px] text-[#8E8E93]">{student.mssv}</p>
@@ -698,6 +943,11 @@ export function StaffPage() {
                             <span className="flex min-h-[36px] items-center gap-[5px] rounded-[10px] bg-[#34C759]/10 px-[10px] text-[13px] font-semibold text-[#248A3D]">
                               <CheckCircle2 className="h-[17px] w-[17px]" aria-hidden="true" />
                               Đã vào
+                            </span>
+                          ) : student.status === 'queued' ? (
+                            <span className="flex min-h-[36px] items-center gap-[5px] rounded-[10px] bg-[#FF9500]/10 px-[10px] text-[13px] font-semibold text-[#A05A00]">
+                              <RefreshCw className="h-[17px] w-[17px]" aria-hidden="true" />
+                              Chờ đồng bộ
                             </span>
                           ) : student.status === 'confirmed' ? (
                             <button
@@ -717,7 +967,7 @@ export function StaffPage() {
                         <div className="p-[32px] text-center">
                           <AlertTriangle className="mx-auto mb-[12px] h-[32px] w-[32px] text-[#8E8E93]" aria-hidden="true" />
                           <p className="text-[15px] font-semibold text-[#1C1C1E]">Không tìm thấy sinh viên</p>
-                          <p className="mt-[4px] text-[13px] text-[#8E8E93]">Dữ liệu offline không chứa MSSV này.</p>
+                          <p className="mt-[4px] text-[13px] text-[#8E8E93]">Không có registration phù hợp trong workshop này.</p>
                         </div>
                       )}
                     </div>
@@ -748,7 +998,7 @@ export function StaffPage() {
                       {syncStatus === 'syncing' ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
                     </button>
                     {syncStatus === 'success' && (
-                      <p className="mt-[14px] text-[14px] font-semibold text-[#248A3D]">Đã đồng bộ dữ liệu demo.</p>
+                      <p className="mt-[14px] text-[14px] font-semibold text-[#248A3D]">Đã đồng bộ hàng đợi.</p>
                     )}
                     {syncStatus === 'error' && (
                       <p className="mt-[14px] text-[14px] font-semibold text-[#D70015]">Chưa thể đồng bộ. Kiểm tra kết nối mạng.</p>
@@ -759,7 +1009,7 @@ export function StaffPage() {
                         onClick={() => void handleClearQueue()}
                         className="mt-[18px] min-h-[44px] rounded-[12px] px-[14px] text-[14px] font-semibold text-[#D70015] focus:outline-none focus:ring-4 focus:ring-[#FF3B30]/15"
                       >
-                        Xóa hàng đợi demo
+                        Xóa hàng đợi
                       </button>
                     )}
                   </div>
@@ -767,7 +1017,7 @@ export function StaffPage() {
               )}
             </main>
 
-            <nav className="z-30 flex shrink-0 border-t border-[#E5E5EA] bg-white px-[14px] pb-[calc(9px+env(safe-area-inset-bottom))] pt-[8px]">
+            <nav className="z-30 flex shrink-0 border-t border-[#E5E5EA] bg-white px-[14px] pb-[calc(16px+env(safe-area-inset-bottom))] pt-[8px]">
               <button
                 type="button"
                 onClick={() => setStationTab('scan')}

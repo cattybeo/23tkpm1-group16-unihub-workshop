@@ -10,12 +10,14 @@ export interface StaffWorkshop {
   registered: number;
 }
 
-export type StaffStudentStatus = 'confirmed' | 'pending_payment' | 'checked_in';
+export type StaffStudentStatus = 'confirmed' | 'pending_payment' | 'checked_in' | 'queued';
 
 export interface StaffStudent {
+  registration_id: string;
   mssv: string;
   name: string;
   status: StaffStudentStatus;
+  qr_token: string | null;
 }
 
 export type OfflineCheckInStatus = 'pending' | 'synced' | 'failed';
@@ -26,6 +28,18 @@ export interface OfflineCheckInRecord {
   workshop_id: string;
   scanned_at: string;
   status: OfflineCheckInStatus;
+}
+
+export interface StaffRosterCache {
+  workshop_id: string;
+  fetched_at: string;
+  students: StaffStudent[];
+}
+
+export interface StaffWorkshopCache {
+  date_key: string;
+  fetched_at: string;
+  workshops: StaffWorkshop[];
 }
 
 export type ScanFeedback =
