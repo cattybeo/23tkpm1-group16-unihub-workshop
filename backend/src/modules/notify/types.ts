@@ -5,6 +5,7 @@ export interface NotificationPayload {
   userId: string
   userEmail: string | null
   registrationId: string | null
+  qrToken: string | null
   title: string
   body: string
   createdAt: string

@@ -119,7 +119,10 @@ export class NotificationService {
   }
 
   private async toPayload(row: NotificationRow): Promise<NotificationPayload> {
-    const { data, error } = await supabase.auth.admin.getUserById(row.user_id)
+    const [{ data, error }, qrToken] = await Promise.all([
+      supabase.auth.admin.getUserById(row.user_id),
+      this.fetchQrToken(row.registration_id),
+    ])
     const userData = data as UserEmailResult | null
 
     if (error) {
@@ -131,10 +134,21 @@ export class NotificationService {
       userId: row.user_id,
       userEmail: userData?.user?.email ?? null,
       registrationId: row.registration_id,
+      qrToken,
       title: row.title,
       body: row.body,
       createdAt: row.created_at,
     }
+  }
+
+  private async fetchQrToken(registrationId: string | null): Promise<string | null> {
+    if (!registrationId) return null
+    const { data } = await supabase
+      .from('registrations')
+      .select('qr_token')
+      .eq('id', registrationId)
+      .single<{ qr_token: string | null }>()
+    return data?.qr_token ?? null
   }
 
   private async markSent(notificationId: string): Promise<void> {

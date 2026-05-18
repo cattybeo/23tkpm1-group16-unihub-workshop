@@ -88,6 +88,10 @@ class NotificationQuery implements PromiseLike<QueryResult<unknown>> {
     return this
   }
 
+  single<T>(): Promise<QueryResult<T>> {
+    return this.execute().then(r => ({ data: (r.data as T[] | null)?.[0] ?? null, error: r.error })) as Promise<QueryResult<T>>
+  }
+
   returns<T>(): Promise<QueryResult<T>> {
     return this.execute() as Promise<QueryResult<T>>
   }
