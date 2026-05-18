@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
-import { verifyJwt, loadProfile, requireRole } from '../../middleware/auth.ts';
-import { SummaryService } from './summary-service.ts';
-import { successResponse, errorResponse } from '../../shared/response-envelope.ts';
+import { verifyJwt, loadProfile, requireRole } from '../../middleware/auth.js';
+import { SummaryService } from './summary-service.js';
+import { successResponse, errorResponse } from '../../shared/response-envelope.js';
 
 const router = Router();
 const service = new SummaryService();
