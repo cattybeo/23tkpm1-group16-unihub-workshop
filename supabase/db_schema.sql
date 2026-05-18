@@ -1,7 +1,7 @@
 -- =============================================================================
 -- ⚠️  HARD RESET — bỏ comment block này để xóa sạch toàn bộ DB
 -- =============================================================================
-/*
+
 drop policy if exists workshops_read_public   on workshops;
 drop policy if exists profiles_read_self      on profiles;
 drop policy if exists profiles_update_self    on profiles;
@@ -29,7 +29,7 @@ drop function if exists public.expire_pending_registrations() cascade;
 
 -- ⚠️  Storage KHÔNG xóa được bằng SQL (Supabase chặn).
 -- Xóa bucket thủ công: Dashboard → Storage → workshop-assets → Delete bucket
-*/
+
 -- =============================================================================
 
 -- =============================================================================
@@ -733,6 +733,132 @@ create policy profiles_update_self on profiles
   using ((select auth.uid()) = id)
   with check ((select auth.uid()) = id);
 
+create table if not exists csv_import_logs (
+  id uuid primary key default gen_random_uuid(),
+  source_file text,
+  source_date date,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  status text not null check (status in ('running', 'completed', 'failed', 'skipped')),
+  total_count integer not null default 0 check (total_count >= 0),
+  valid_count integer not null default 0 check (valid_count >= 0),
+  created_count integer not null default 0 check (created_count >= 0),
+  updated_count integer not null default 0 check (updated_count >= 0),
+  deactivated_count integer not null default 0 check (deactivated_count >= 0),
+  skipped_count integer not null default 0 check (skipped_count >= 0),
+  error_count integer not null default 0 check (error_count >= 0),
+  errors jsonb not null default '[]'::jsonb,
+  message text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists csv_import_logs_started_at_idx
+  on csv_import_logs (started_at desc);
+
+create unique index if not exists csv_import_logs_completed_source_file_idx
+  on csv_import_logs (source_file)
+  where source_file is not null and status = 'completed';
+
+alter table if exists csv_import_logs enable row level security;
+
+grant all on csv_import_logs to service_role;
+
+comment on table csv_import_logs is
+  'Audit log cho CSV nightly student import. Backend ghi qua service_role; không expose trực tiếp cho FE.';
+
+alter table if exists csv_import_logs
+  add column if not exists imported_at timestamptz,
+  add column if not exists imported_count integer;
+
+update csv_import_logs
+set
+  imported_at = coalesce(imported_at, finished_at, started_at, created_at, now()),
+  imported_count = coalesce(imported_count, valid_count, 0)
+where imported_at is null or imported_count is null;
+
+alter table if exists csv_import_logs
+  alter column imported_at set default now(),
+  alter column imported_at set not null,
+  alter column imported_count set default 0,
+  alter column imported_count set not null;
+
+alter table if exists csv_import_logs
+  drop column if exists source_date,
+  drop column if exists started_at,
+  drop column if exists finished_at,
+  drop column if exists total_count,
+  drop column if exists valid_count,
+  drop column if exists created_count,
+  drop column if exists updated_count,
+  drop column if exists deactivated_count,
+  drop column if exists skipped_count,
+  drop column if exists error_count,
+  drop column if exists errors;
+
+drop index if exists csv_import_logs_started_at_idx;
+
+create index if not exists csv_import_logs_imported_at_idx
+  on csv_import_logs (imported_at desc);
+
+drop index if exists csv_import_logs_completed_source_file_idx;
+
+create unique index if not exists csv_import_logs_completed_source_file_idx
+  on csv_import_logs (source_file)
+  where source_file is not null and status = 'completed';
+
+alter table if exists csv_import_logs enable row level security;
+grant all on csv_import_logs to service_role;
+
+drop policy if exists "workshop_assets_insert_organizer" on storage.objects;
+drop policy if exists "workshop_assets_update_organizer" on storage.objects;
+drop policy if exists "workshop_assets_delete_organizer" on storage.objects;
+
+create policy "workshop_assets_insert_organizer"
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'workshop-assets'
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role = 'organizer'
+    )
+  );
+
+create policy "workshop_assets_update_organizer"
+  on storage.objects
+  for update
+  to authenticated
+  using (
+    bucket_id = 'workshop-assets'
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role = 'organizer'
+    )
+  )
+  with check (
+    bucket_id = 'workshop-assets'
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role = 'organizer'
+    )
+  );
+
+create policy "workshop_assets_delete_organizer"
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'workshop-assets'
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role = 'organizer'
+    )
+  );
 
 -- ============================================================================
 -- STORAGE — bucket workshop-assets (cover image + room map)
@@ -802,6 +928,183 @@ create policy "workshop_assets_delete_organizer"
     )
   );
 */
+
+-- ============================================================================
+-- BULK NOTIFICATION OUTBOX RPC — workshop change broadcast
+-- (đã có trong migration 20260517000008_notify_workshop_change_rpc.sql)
+-- ----------------------------------------------------------------------------
+-- Dùng khi organizer cancel / đổi giờ / đổi phòng workshop. Insert hàng loạt
+-- notification cho mọi registration đang `confirmed`, trả về danh sách id để
+-- listener dispatch (in-app + email mock).
+-- ============================================================================
+create or replace function public.notify_workshop_change(
+  p_workshop_id uuid,
+  p_title text,
+  p_body text
+)
+returns table (notification_id uuid)
+language plpgsql
+set search_path = public
+as $$
+begin
+  return query
+  with affected as (
+    select r.id as registration_id, p.id as user_id
+      from registrations r
+      join profiles p on p.mssv = r.mssv
+     where r.workshop_id = p_workshop_id
+       and r.status = 'confirmed'::registration_status
+  )
+  insert into notifications (user_id, registration_id, title, body, status)
+  select user_id, registration_id, p_title, p_body, 'pending'::notification_status
+    from affected
+  returning id;
+end;
+$$;
+
+revoke all on function public.notify_workshop_change(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.notify_workshop_change(uuid, text, text) to service_role;
+
+
+-- ============================================================================
+-- REGISTRATION RPC v2 — bổ sung gate students.is_active
+-- (đã có trong migration 20260517000009_register_check_student_active.sql)
+-- ----------------------------------------------------------------------------
+-- ⚠️  ĐÈ definition phía trên (create or replace).
+-- Raise STUDENT_NOT_VERIFIED khi mssv không có trong students hoặc đã bị soft
+-- delete (is_active = false) bởi CSV nightly. Phần còn lại giữ nguyên logic
+-- atomic seat decrement + outbox notification.
+-- ============================================================================
+create or replace function public.create_registration_with_outbox(
+  p_mssv text,
+  p_workshop_id uuid,
+  p_user_id uuid
+)
+returns table (
+  registration_id uuid,
+  workshop_id uuid,
+  status registration_status,
+  qr_token text,
+  fee_vnd integer,
+  notification_id uuid
+)
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_workshop record;
+  v_existing record;
+  v_student_active boolean;
+  v_registration_id uuid;
+  v_qr_token text := gen_random_uuid()::text;
+  v_status registration_status;
+  v_expires_at timestamptz;
+  v_notification_id uuid;
+begin
+  select is_active into v_student_active
+    from students
+   where mssv = p_mssv;
+
+  if not found or v_student_active is not true then
+    raise exception 'STUDENT_NOT_VERIFIED';
+  end if;
+
+  update workshops
+     set seats_remaining = seats_remaining - 1
+   where id = p_workshop_id
+     and seats_remaining > 0
+     and is_published = true
+     and cancelled_at is null
+   returning id, title, fee_vnd
+        into v_workshop;
+
+  if not found then
+    select id, seats_remaining, is_published, cancelled_at
+      into v_existing
+      from workshops
+     where id = p_workshop_id;
+
+    if not found or v_existing.is_published is not true or v_existing.cancelled_at is not null then
+      raise exception 'RESOURCE_NOT_FOUND';
+    end if;
+
+    raise exception 'SEATS_SOLD_OUT';
+  end if;
+
+  v_status := case
+    when v_workshop.fee_vnd = 0 then 'confirmed'::registration_status
+    else 'pending_payment'::registration_status
+  end;
+  v_expires_at := case
+    when v_status = 'pending_payment' then now() + interval '15 minutes'
+    else null
+  end;
+
+  insert into registrations (
+    mssv,
+    workshop_id,
+    status,
+    qr_token,
+    expires_at,
+    confirmed_at
+  )
+  values (
+    p_mssv,
+    p_workshop_id,
+    v_status,
+    v_qr_token,
+    v_expires_at,
+    case when v_status = 'confirmed' then now() else null end
+  )
+  returning id into v_registration_id;
+
+  if v_status = 'confirmed' then
+    insert into notifications (
+      user_id,
+      registration_id,
+      title,
+      body,
+      status
+    )
+    values (
+      p_user_id,
+      v_registration_id,
+      'Đăng ký workshop thành công',
+      'Bạn đã đăng ký thành công workshop "' || v_workshop.title || '". Mã QR đã sẵn sàng trong Vé của tôi.',
+      'pending'
+    )
+    returning id into v_notification_id;
+  end if;
+
+  return query
+    select v_registration_id, p_workshop_id, v_status, v_qr_token, v_workshop.fee_vnd, v_notification_id;
+end;
+$$;
+
+
+-- ============================================================================
+-- NOTIFICATIONS REALTIME — grant SELECT + RLS self-select + publication
+-- (đã có trong migration 20260517000010_notifications_realtime_policy.sql)
+-- ----------------------------------------------------------------------------
+-- FE subscribe Supabase Realtime (`postgres_changes` filter user_id=eq.<self>)
+-- để cập nhật chuông thông báo. Block RLS trên `notifications` mặc định
+-- deny-all với authenticated; ở đây grant SELECT + policy giới hạn theo
+-- user_id, đồng thời add bảng vào publication `supabase_realtime`.
+-- ============================================================================
+grant select on table notifications to authenticated;
+
+do $$ begin
+  create policy notifications_self_select on notifications
+    for select to authenticated
+    using (user_id = auth.uid());
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table notifications;
+exception when duplicate_object then null;
+end $$;
+
 
 -- =============================================================================
 -- KẾT THÚC SCHEMA
