@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/index.ts",
+    "dev": "tsx watch --env-file=../.env src/index.ts",
     "build": "tsc",
-    "start": "node --env-file=.env dist/index.js",
-    "reset:accounts": "tsx --env-file=.env src/scripts/reset-accounts.ts",
+    "start": "node --env-file=../.env dist/index.js",
+    "reset:accounts": "tsx --env-file=../.env src/scripts/reset-accounts.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
