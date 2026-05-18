@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const supabaseMock = vi.hoisted(() => ({
@@ -15,7 +18,7 @@ vi.mock('../lib/supabase.js', () => ({
   supabase: supabaseMock,
 }))
 
-import { CsvImportError, importStudentsFromCsv } from './csv.service.js'
+import { CsvImportError, importNightlyStudentsForDate, importStudentsFromCsv } from './csv.service.js'
 
 interface QueryError {
   message: string
@@ -42,9 +45,19 @@ interface ProfileMemory {
   must_change_password: boolean
 }
 
+interface CsvImportLogMemory {
+  id?: string
+  source_file: string | null
+  imported_at: string
+  imported_count: number
+  status: 'completed' | 'failed'
+  message: string | null
+}
+
 interface MemoryDb {
   students: Map<string, StudentMemory>
   profiles: Map<string, ProfileMemory>
+  csvImportLogs: Map<string, CsvImportLogMemory>
 }
 
 class MemoryQuery implements PromiseLike<QueryResult<unknown>> {
@@ -65,9 +78,9 @@ class MemoryQuery implements PromiseLike<QueryResult<unknown>> {
     return this
   }
 
-  async in(column: string, values: string[]): Promise<QueryResult<unknown>> {
+  in(column: string, values: string[]): this {
     this.filters.set(column, values)
-    return this.execute()
+    return this
   }
 
   update(payload: Record<string, unknown>): this {
@@ -84,8 +97,18 @@ class MemoryQuery implements PromiseLike<QueryResult<unknown>> {
     return { data: null, error: null }
   }
 
-  async insert(payload: ProfileMemory): Promise<QueryResult<null>> {
-    this.db.profiles.set(payload.id, payload)
+  async insert(payload: ProfileMemory | CsvImportLogMemory): Promise<QueryResult<null>> {
+    if (this.table === 'csv_import_logs') {
+      const row = payload as CsvImportLogMemory
+      this.db.csvImportLogs.set(row.id ?? `log-${this.db.csvImportLogs.size + 1}`, {
+        ...row,
+        id: row.id ?? `log-${this.db.csvImportLogs.size + 1}`,
+      })
+      return { data: null, error: null }
+    }
+
+    const profile = payload as ProfileMemory
+    this.db.profiles.set(profile.id, profile)
     return { data: null, error: null }
   }
 
@@ -125,7 +148,9 @@ class MemoryQuery implements PromiseLike<QueryResult<unknown>> {
   private async executeRows(): Promise<unknown[]> {
     const rows = this.table === 'students'
       ? [...this.db.students.values()]
-      : [...this.db.profiles.values()]
+      : this.table === 'profiles'
+        ? [...this.db.profiles.values()]
+        : [...this.db.csvImportLogs.values()]
 
     return rows.filter((row) => {
       const record = row as unknown as Record<string, unknown>
@@ -150,6 +175,7 @@ describe('CSV student import', () => {
     db = {
       students: new Map(),
       profiles: new Map(),
+      csvImportLogs: new Map(),
     }
     authSequence = 0
     vi.clearAllMocks()
@@ -255,5 +281,83 @@ describe('CSV student import', () => {
 
   it('rejects files with the wrong header', async () => {
     await expect(importStudentsFromCsv('id,name\n1,Alice')).rejects.toBeInstanceOf(CsvImportError)
+  })
+
+  it('imports the nightly CSV for the requested date from CSV_IMPORT_DIR', async () => {
+    const previousDir = process.env.CSV_IMPORT_DIR
+    const dir = await mkdtemp(path.join(tmpdir(), 'unihub-csv-'))
+    process.env.CSV_IMPORT_DIR = dir
+
+    try {
+      await writeFile(
+        path.join(dir, 'students_nightly_2026-05-17.csv'),
+        ['mssv,full_name', '23127001,Nguyễn Văn A'].join('\n'),
+        'utf8',
+      )
+
+      const result = await importNightlyStudentsForDate('2026-05-17')
+
+      expect(result.source_file).toBe(path.join(dir, 'students_nightly_2026-05-17.csv'))
+      expect(result.valid).toBe(1)
+      expect(result.status).toBe('completed')
+      expect(db.students.get('23127001')?.full_name).toBe('Nguyễn Văn A')
+      expect(db.profiles.size).toBe(1)
+      expect(db.csvImportLogs.size).toBe(1)
+    } finally {
+      if (previousDir === undefined) delete process.env.CSV_IMPORT_DIR
+      else process.env.CSV_IMPORT_DIR = previousDir
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('can re-run the same nightly CSV idempotently and updates the existing log', async () => {
+    const previousDir = process.env.CSV_IMPORT_DIR
+    const dir = await mkdtemp(path.join(tmpdir(), 'unihub-csv-'))
+    process.env.CSV_IMPORT_DIR = dir
+
+    try {
+      const filePath = path.join(dir, 'students_nightly_2026-05-17.csv')
+      await writeFile(
+        filePath,
+        ['mssv,full_name', '23127001,Nguyễn Văn A'].join('\n'),
+        'utf8',
+      )
+
+      const first = await importNightlyStudentsForDate('2026-05-17')
+      const second = await importNightlyStudentsForDate('2026-05-17')
+
+      expect(first.status).toBe('completed')
+      expect(second).toMatchObject({
+        source_file: filePath,
+        status: 'completed',
+        valid: 1,
+        created: 0,
+        updated: 1,
+        deactivated: 0,
+      })
+      expect(supabaseMock.auth.admin.createUser).toHaveBeenCalledTimes(1)
+      expect(db.csvImportLogs.size).toBe(1)
+    } finally {
+      if (previousDir === undefined) delete process.env.CSV_IMPORT_DIR
+      else process.env.CSV_IMPORT_DIR = previousDir
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns CSV_FILE_NOT_FOUND when the requested nightly CSV is missing', async () => {
+    const previousDir = process.env.CSV_IMPORT_DIR
+    const dir = await mkdtemp(path.join(tmpdir(), 'unihub-csv-'))
+    process.env.CSV_IMPORT_DIR = dir
+
+    try {
+      await expect(importNightlyStudentsForDate('2099-01-01')).rejects.toMatchObject({
+        code: 'CSV_FILE_NOT_FOUND',
+        status: 404,
+      })
+    } finally {
+      if (previousDir === undefined) delete process.env.CSV_IMPORT_DIR
+      else process.env.CSV_IMPORT_DIR = previousDir
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

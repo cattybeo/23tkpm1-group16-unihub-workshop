@@ -1,5 +1,5 @@
-import { createReadStream } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { createReadStream, constants as fsConstants } from 'node:fs'
+import { readdir, access } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import Papa from 'papaparse'
@@ -8,10 +8,28 @@ import { supabase } from '../lib/supabase.js'
 import type { ErrorCode } from '../shared/http.js'
 
 const DEFAULT_PASSWORD = process.env.STUDENT_DEFAULT_PASSWORD ?? '123'
-const EMAIL_DOMAIN = process.env.STUDENT_EMAIL_DOMAIN ?? 'students.unihub.internal'
+const EMAIL_DOMAIN = process.env.STUDENT_EMAIL_DOMAIN ?? 'student.hcmus.edu.vn'
 const BATCH_SIZE = 1_000
 const NIGHTLY_FILE_RE = /^students_nightly_(\d{4}-\d{2}-\d{2})\.csv$/
 const PROFILE_COLUMNS = 'id, role, mssv, display_name, phone, must_change_password'
+const IMPORT_LOG_COLUMNS = [
+  'id',
+  'source_file',
+  'imported_at',
+  'imported_count',
+  'status',
+  'message',
+].join(', ')
+const LEGACY_IMPORT_LOG_COLUMNS = [
+  'id',
+  'source_file',
+  'source_date',
+  'started_at',
+  'finished_at',
+  'status',
+  'valid_count',
+  'message',
+].join(', ')
 
 interface RawCsvRow {
   mssv?: string | null
@@ -49,6 +67,10 @@ export interface CsvRowError {
 
 export interface ImportResult {
   source_file: string | null
+  source_date: string | null
+  status: 'completed' | 'skipped'
+  started_at: string
+  finished_at: string
   total: number
   valid: number
   created: number
@@ -56,6 +78,33 @@ export interface ImportResult {
   deactivated: number
   skipped: number
   errors: CsvRowError[]
+  message?: string
+}
+
+type ImportLogStatus = 'completed' | 'failed'
+
+interface CsvImportLogRow {
+  id: string
+  source_file: string | null
+  source_date?: string | null
+  started_at?: string
+  finished_at?: string | null
+  imported_at?: string
+  imported_count?: number
+  valid_count?: number
+  status: ImportLogStatus
+  message: string | null
+}
+
+export interface CsvImportLog {
+  id: string
+  source_file: string | null
+  source_date: string | null
+  started_at: string
+  finished_at: string | null
+  status: ImportLogStatus
+  imported_students: number
+  message: string | null
 }
 
 interface ParsedCsv {
@@ -193,17 +242,199 @@ function chunkRows<T>(rows: T[], size: number): T[][] {
   return chunks
 }
 
-async function fetchExistingStudents(): Promise<Set<string>> {
+function extractSourceDate(sourceFile: string | null): string | null {
+  if (!sourceFile) return null
+  const match = path.basename(sourceFile).match(NIGHTLY_FILE_RE)
+  return match?.[1] ?? null
+}
+
+function toPublicImportLog(row: CsvImportLogRow): CsvImportLog {
+  const importedAt = row.imported_at ?? row.finished_at ?? row.started_at ?? new Date().toISOString()
+  return {
+    id: row.id,
+    source_file: row.source_file,
+    source_date: row.source_date ?? extractSourceDate(row.source_file),
+    started_at: importedAt,
+    finished_at: importedAt,
+    status: row.status,
+    imported_students: row.imported_count ?? row.valid_count ?? 0,
+    message: row.message,
+  }
+}
+
+function isImportLogSchemaError(error: { message: string } | null): boolean {
+  return Boolean(error?.message.match(/column|schema cache|does not exist|csv_import_logs|imported_at|imported_count/i))
+}
+
+async function findCompletedImportLog(sourceFile: string | null): Promise<CsvImportLogRow | null> {
+  if (!sourceFile) return null
+
   const { data, error } = await supabase
-    .from('students')
-    .select('mssv')
-    .returns<StudentKeyRow[]>()
+    .from('csv_import_logs')
+    .select(IMPORT_LOG_COLUMNS)
+    .eq('source_file', sourceFile)
+    .eq('status', 'completed')
+    .maybeSingle<CsvImportLogRow>()
+
+  if (isImportLogSchemaError(error)) {
+    const legacy = await supabase
+      .from('csv_import_logs')
+      .select(LEGACY_IMPORT_LOG_COLUMNS)
+      .eq('source_file', sourceFile)
+      .eq('status', 'completed')
+      .maybeSingle<CsvImportLogRow>()
+
+    if (isImportLogSchemaError(legacy.error)) return null
+    if (legacy.error) throw new CsvImportError('CSV_IMPORT_FAILED', legacy.error.message, 500)
+    return legacy.data
+  }
 
   if (error) {
     throw new CsvImportError('CSV_IMPORT_FAILED', error.message, 500)
   }
 
-  return new Set((data ?? []).map((student) => student.mssv))
+  return data
+}
+
+async function insertImportLog(result: ImportResult, status: ImportLogStatus, message?: string): Promise<void> {
+  const existing = status === 'completed' ? await findCompletedImportLog(result.source_file) : null
+  if (existing) {
+    const { error } = await supabase
+      .from('csv_import_logs')
+      .update({
+        imported_at: result.finished_at,
+        imported_count: result.valid,
+        status,
+        message: message ?? result.message ?? null,
+      })
+      .eq('id', existing.id)
+
+    if (isImportLogSchemaError(error)) {
+      const legacy = await supabase
+        .from('csv_import_logs')
+        .update({
+          source_date: result.source_date,
+          started_at: result.started_at,
+          finished_at: result.finished_at,
+          status,
+          total_count: result.total,
+          valid_count: result.valid,
+          created_count: result.created,
+          updated_count: result.updated,
+          deactivated_count: result.deactivated,
+          skipped_count: result.skipped,
+          error_count: result.errors.length,
+          errors: result.errors,
+          message: message ?? result.message ?? null,
+        })
+        .eq('id', existing.id)
+
+      if (legacy.error) console.error('[csv-import] failed to update import log:', legacy.error.message)
+      return
+    }
+
+    if (error) console.error('[csv-import] failed to update import log:', error.message)
+    return
+  }
+
+  const { error } = await supabase.from('csv_import_logs').insert({
+    source_file: result.source_file,
+    imported_at: result.finished_at,
+    imported_count: result.valid,
+    status,
+    message: message ?? result.message ?? null,
+  })
+
+  if (isImportLogSchemaError(error)) {
+    const legacy = await supabase.from('csv_import_logs').insert({
+      source_file: result.source_file,
+      source_date: result.source_date,
+      started_at: result.started_at,
+      finished_at: result.finished_at,
+      status,
+      total_count: result.total,
+      valid_count: result.valid,
+      created_count: result.created,
+      updated_count: result.updated,
+      deactivated_count: result.deactivated,
+      skipped_count: result.skipped,
+      error_count: result.errors.length,
+      errors: result.errors,
+      message: message ?? result.message ?? null,
+    })
+    if (legacy.error) {
+      console.error('[csv-import] failed to insert import log:', legacy.error.message)
+    }
+    return
+  }
+
+  if (error) {
+    console.error('[csv-import] failed to insert import log:', error.message)
+  }
+}
+
+async function insertFailedImportLog(sourceFile: string | null, errorMessage: string): Promise<void> {
+  const { error } = await supabase
+    .from('csv_import_logs')
+    .insert({
+      source_file: sourceFile,
+      imported_at: new Date().toISOString(),
+      imported_count: 0,
+      status: 'failed',
+      message: errorMessage,
+    })
+
+  if (isImportLogSchemaError(error)) {
+    const now = new Date().toISOString()
+    const legacy = await supabase.from('csv_import_logs').insert({
+      source_file: sourceFile,
+      source_date: extractSourceDate(sourceFile),
+      started_at: now,
+      finished_at: now,
+      status: 'failed',
+      total_count: 0,
+      valid_count: 0,
+      created_count: 0,
+      updated_count: 0,
+      deactivated_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      errors: [],
+      message: errorMessage,
+    })
+    if (legacy.error) console.error('[csv-import] failed to insert failed import log:', legacy.error.message)
+    return
+  }
+
+  if (error) console.error('[csv-import] failed to insert failed import log:', error.message)
+}
+
+export async function listCsvImportLogs(limit = 10): Promise<CsvImportLog[]> {
+  const { data, error } = await supabase
+    .from('csv_import_logs')
+    .select(IMPORT_LOG_COLUMNS)
+    .order('imported_at', { ascending: false })
+    .limit(limit)
+    .returns<CsvImportLogRow[]>()
+
+  if (isImportLogSchemaError(error)) {
+    const legacy = await supabase
+      .from('csv_import_logs')
+      .select(LEGACY_IMPORT_LOG_COLUMNS)
+      .order('started_at', { ascending: false })
+      .limit(limit)
+      .returns<CsvImportLogRow[]>()
+
+    if (isImportLogSchemaError(legacy.error)) return []
+    if (legacy.error) throw new CsvImportError('CSV_IMPORT_FAILED', legacy.error.message, 500)
+    return (legacy.data ?? []).map(toPublicImportLog)
+  }
+
+  if (error) {
+    throw new CsvImportError('CSV_IMPORT_FAILED', error.message, 500)
+  }
+
+  return (data ?? []).map(toPublicImportLog)
 }
 
 async function upsertStudents(rows: ValidStudentRow[], importedAt: string): Promise<void> {
@@ -252,18 +483,26 @@ async function deactivateMissingStudents(importedMssv: Set<string>, importedAt: 
   return toDeactivate.length
 }
 
-async function findProfileByMssv(mssv: string): Promise<ProfileRow | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select(PROFILE_COLUMNS)
-    .eq('mssv', mssv)
-    .maybeSingle<ProfileRow>()
+async function loadProfilesByMssv(mssvList: string[]): Promise<Map<string, ProfileRow>> {
+  const profileMap = new Map<string, ProfileRow>()
 
-  if (error) {
-    throw new CsvImportError('CSV_IMPORT_FAILED', error.message, 500)
+  for (const batch of chunkRows(mssvList, BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(PROFILE_COLUMNS)
+      .in('mssv', batch)
+      .returns<ProfileRow[]>()
+
+    if (error) {
+      throw new CsvImportError('CSV_IMPORT_FAILED', error.message, 500)
+    }
+
+    for (const profile of data ?? []) {
+      if (profile.mssv) profileMap.set(profile.mssv, profile)
+    }
   }
 
-  return data
+  return profileMap
 }
 
 async function updateExistingAccount(profile: ProfileRow, row: ValidStudentRow): Promise<string | null> {
@@ -364,30 +603,52 @@ async function createStudentAccount(
 }
 
 async function syncAccounts(rows: ValidStudentRow[], result: ImportResult): Promise<void> {
+  const existingProfiles = await loadProfilesByMssv(rows.map((r) => r.mssv))
+
+  const toCreate: ValidStudentRow[] = []
+  const toUpdate: Array<{ profile: ProfileRow; row: ValidStudentRow }> = []
+
+  for (const row of rows) {
+    const profile = existingProfiles.get(row.mssv)
+    if (profile) toUpdate.push({ profile, row })
+    else toCreate.push(row)
+  }
+
+  for (const { profile, row } of toUpdate) {
+    try {
+      const nameChanged = profile.display_name !== row.full_name
+      const error = nameChanged ? await updateExistingAccount(profile, row) : null
+      if (error) {
+        result.errors.push({ mssv: row.mssv, reason: error })
+        continue
+      }
+      result.updated += 1
+    } catch (err) {
+      result.errors.push({
+        mssv: row.mssv,
+        reason: err instanceof Error ? err.message : 'Account sync failed',
+      })
+    }
+  }
+
   let authUsersByEmail: Map<string, string> | null = null
   const getAuthUsersByEmail = async () => {
     authUsersByEmail ??= await loadAuthUsersByEmail()
     return authUsersByEmail
   }
 
-  for (const row of rows) {
+  for (const row of toCreate) {
     try {
-      const profile = await findProfileByMssv(row.mssv)
-      const error = profile
-        ? await updateExistingAccount(profile, row)
-        : await createStudentAccount(row, getAuthUsersByEmail)
-
+      const error = await createStudentAccount(row, getAuthUsersByEmail)
       if (error) {
         result.errors.push({ mssv: row.mssv, reason: error })
         continue
       }
-
-      if (profile) result.updated += 1
-      else result.created += 1
-    } catch (error) {
+      result.created += 1
+    } catch (err) {
       result.errors.push({
         mssv: row.mssv,
-        reason: error instanceof Error ? error.message : 'Account sync failed',
+        reason: err instanceof Error ? err.message : 'Account sync failed',
       })
     }
   }
@@ -395,9 +656,14 @@ async function syncAccounts(rows: ValidStudentRow[], result: ImportResult): Prom
 
 async function importParsedCsv(parsed: ParsedCsv, sourceFile: string | null): Promise<ImportResult> {
   const normalized = normalizeRows(parsed)
+  const sourceDate = extractSourceDate(sourceFile)
   const importedAt = new Date().toISOString()
   const result: ImportResult = {
     source_file: sourceFile,
+    source_date: sourceDate,
+    status: 'completed',
+    started_at: importedAt,
+    finished_at: importedAt,
     total: parsed.rows.length,
     valid: normalized.rows.length,
     created: 0,
@@ -411,13 +677,13 @@ async function importParsedCsv(parsed: ParsedCsv, sourceFile: string | null): Pr
     return result
   }
 
-  await fetchExistingStudents()
   await upsertStudents(normalized.rows, importedAt)
   await syncAccounts(normalized.rows, result)
   result.deactivated = await deactivateMissingStudents(
     new Set(normalized.rows.map((row) => row.mssv)),
     importedAt,
   )
+  result.finished_at = new Date().toISOString()
 
   return result
 }
@@ -462,10 +728,39 @@ export async function importStudentsFromCsv(csvText: string, sourceFile: string 
 }
 
 export async function importStudentsFromFile(filePath: string): Promise<ImportResult> {
-  return importParsedCsv(await parseCsvFile(filePath), filePath)
+  try {
+    const result = await importParsedCsv(await parseCsvFile(filePath), filePath)
+    await insertImportLog(result, 'completed')
+    return result
+  } catch (err) {
+    await insertFailedImportLog(filePath, err instanceof Error ? err.message : 'Import failed')
+    throw err
+  }
 }
 
 export async function importLatestNightlyStudents(): Promise<ImportResult> {
   const filePath = await findLatestNightlyCsvFile()
   return importStudentsFromFile(filePath)
+}
+
+export async function findNightlyCsvForDate(dateStr: string): Promise<string> {
+  const fileName = `students_nightly_${dateStr}.csv`
+  for (const dir of candidateImportDirs()) {
+    const fullPath = path.join(dir, fileName)
+    try {
+      await access(fullPath, fsConstants.R_OK)
+      return fullPath
+    } catch {
+      continue
+    }
+  }
+  throw new CsvImportError(
+    'CSV_FILE_NOT_FOUND',
+    `Không tìm thấy file ${fileName} trong legacy-data hoặc CSV_IMPORT_DIR`,
+    404,
+  )
+}
+
+export async function importNightlyStudentsForDate(dateStr: string): Promise<ImportResult> {
+  return importStudentsFromFile(await findNightlyCsvForDate(dateStr))
 }

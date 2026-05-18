@@ -1,19 +1,14 @@
-import { CsvService } from '../modules/datasync/csv-service.ts';
-import path from 'node:path';
+import cron from 'node-cron'
+import { importLatestNightlyStudents } from '../services/csv.service.js'
 
-export const initCronJobs = () => {
-  const csvService = new CsvService();
-
-  setInterval(async () => {
-    console.log('[Cron] Đang kiểm tra file CSV nightly...');
-    const filePath = path.resolve('../data/legacy_csv/students_nightly_latest.csv');
-    
+export function initCronJobs(): void {
+  cron.schedule('0 2 * * *', async () => {
+    console.log('[cron] CSV nightly import bắt đầu')
     try {
-      if (fs.existsSync(filePath)) {
-        await csvService.importFromPath(filePath);
-      }
+      const result = await importLatestNightlyStudents()
+      console.log('[cron] CSV import xong:', result)
     } catch (err) {
-      console.error('[Cron] Lỗi import tự động:', err);
+      console.error('[cron] CSV import lỗi:', err)
     }
-  }, 24 * 60 * 60 * 1000); 
-};
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+}
